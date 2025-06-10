@@ -17,23 +17,11 @@ import platform.windows.HANDLEVar
 import platform.windows.ReadFile
 import platform.windows.WriteFile
 
+
 @OptIn(ExperimentalForeignApi::class)
-internal interface WinPipe : AutoCloseable {
-    fun closeWrite()
-    fun closeRead()
-    fun readable(): Readable
-    fun writable(): Writable
+internal class WinPipe {
     val read: WinHandle
     val write: WinHandle
-
-}
-
-internal fun WinPipe(): WinPipe = WinPipeImpl()
-
-@OptIn(ExperimentalForeignApi::class)
-internal class WinPipeImpl : WinPipe {
-    override val read: WinHandle
-    override val write: WinHandle
     private val readCloseLock = ReentrantLock()
     private val writeCloseLock = ReentrantLock()
     private var readClosed = false
@@ -55,15 +43,15 @@ internal class WinPipeImpl : WinPipe {
         }
     }
 
-    override fun closeWrite() {
+    fun closeWrite() {
         writeCloseLock.withLock { write.close() }
     }
 
-    override fun closeRead() {
+    fun closeRead() {
         readCloseLock.withLock { read.close() }
     }
 
-    override fun close() {
+    fun close() {
         closeWrite()
         closeRead()
     }
@@ -101,7 +89,7 @@ internal class WinPipeImpl : WinPipe {
         }
     }
 
-    override fun readable(): Readable = readable
+    fun readable(): Readable = readable
 
     private val writable = object : Writable {
         override fun write(buf: ByteArray, offset: Int, length: Int): Int {
@@ -135,6 +123,6 @@ internal class WinPipeImpl : WinPipe {
     }
 
 
-    override fun writable(): Writable = writable
+    fun writable(): Writable = writable
 }
 

@@ -24,6 +24,8 @@ internal fun WinHandle(handle: HANDLE): WinHandle {
         private val cleaner = createCleaner(wrapper) {
             it.close()
         }
+
+        override fun toString(): String = handle.toString()
     }
 }
 
@@ -40,5 +42,8 @@ private class WinHandleImpl(override val handle: HANDLE) : WinHandle {
             if (CloseHandle(handle) == 0) throwLastWinError("CloseHandle")
         }
     }
+
+    override fun toString(): String =
+        if (closed.value) "WinHandle(handle=$handle[closed])" else "WinHandle(handle=$handle)"
 }
 
