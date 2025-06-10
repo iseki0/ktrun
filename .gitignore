@@ -47,3 +47,4 @@ bin/
 *.log
 
 *.patch
+/output.txt

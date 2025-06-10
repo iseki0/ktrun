@@ -10,20 +10,10 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
-import platform.windows.CloseHandle
-import platform.windows.CreateFileW
 import platform.windows.CreatePipe
 import platform.windows.ERROR_BROKEN_PIPE
-import platform.windows.FILE_ATTRIBUTE_NORMAL
-import platform.windows.FILE_SHARE_DELETE
-import platform.windows.FILE_SHARE_READ
-import platform.windows.FILE_SHARE_WRITE
-import platform.windows.GENERIC_READ
-import platform.windows.GENERIC_WRITE
 import platform.windows.GetLastError
-import platform.windows.HANDLE
 import platform.windows.HANDLEVar
-import platform.windows.INVALID_HANDLE_VALUE
 import platform.windows.ReadFile
 import platform.windows.WriteFile
 
@@ -146,35 +136,5 @@ internal class WinPipeImpl : WinPipe {
 
 
     override fun writable(): Writable = writable
-}
-
-@OptIn(ExperimentalForeignApi::class)
-internal class WinFileHandle(path: String, openMode: UInt) : AutoCloseable {
-    val handle: HANDLE
-    private var closed = false
-
-    init {
-        val handle = CreateFileW(
-            lpFileName = path,
-            dwDesiredAccess = GENERIC_READ or GENERIC_WRITE.toUInt(),
-            dwShareMode = FILE_SHARE_DELETE.toUInt() or FILE_SHARE_READ.toUInt() or FILE_SHARE_WRITE.toUInt(),
-            lpSecurityAttributes = null,
-            dwCreationDisposition = openMode,
-            dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL.toUInt(),
-            hTemplateFile = null,
-        )
-        if (handle == null || handle == INVALID_HANDLE_VALUE) {
-            throwLastWinError("CreateFileW")
-        }
-        this.handle = handle
-    }
-
-    override fun close() {
-        if (closed) return
-        closed = true
-        if (CloseHandle(handle) == 0) {
-            throwLastWinError("CloseHandle", listOf("handle" to "file handle"))
-        }
-    }
 }
 

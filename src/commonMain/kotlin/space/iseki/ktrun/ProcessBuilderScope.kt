@@ -46,7 +46,8 @@ internal class ProcessBuilderScopeImpl : ProcessBuilderScope {
 fun ProcessBuilderScope.nul() = ProcessIOHandler.NULL
 fun ProcessBuilderScope.pipe() = ProcessIOHandler.PIPE
 fun ProcessBuilderScope.inherit() = ProcessIOHandler.INHERIT
-fun ProcessBuilderScope.file(path: String) = ProcessIOHandler.Path(path)
+fun ProcessBuilderScope.file(path: String) =
+    ProcessIOHandler.Path(path)
 
 @OptIn(ExperimentalContracts::class)
 fun buildProcess(block: ProcessBuilderScope.() -> Unit): Process {

@@ -17,12 +17,14 @@ import kotlinx.cinterop.set
 import kotlinx.cinterop.sizeOf
 import kotlinx.cinterop.value
 import kotlinx.cinterop.wcstr
+import platform.windows.CREATE_ALWAYS
 import platform.windows.CREATE_UNICODE_ENVIRONMENT
 import platform.windows.CreateFileW
 import platform.windows.CreateProcessW
 import platform.windows.DWORDVar
 import platform.windows.EXTENDED_STARTUPINFO_PRESENT
 import platform.windows.FILE_ATTRIBUTE_NORMAL
+import platform.windows.FILE_SHARE_DELETE
 import platform.windows.FILE_SHARE_READ
 import platform.windows.FILE_SHARE_WRITE
 import platform.windows.GENERIC_READ
@@ -34,6 +36,7 @@ import platform.windows.HANDLE
 import platform.windows.HANDLEVar
 import platform.windows.HANDLE_FLAG_INHERIT
 import platform.windows.INFINITE
+import platform.windows.INVALID_HANDLE_VALUE
 import platform.windows.OPEN_EXISTING
 import platform.windows.PROCESS_INFORMATION
 import platform.windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST
@@ -77,8 +80,31 @@ internal class WinProcessImpl(
         memScoped {
             val failCleanup = mutableListOf<() -> Unit>()
             val successCleanup = mutableListOf<() -> Unit>()
+            fun openFile(opt: ProcessIOHandler.Path, input: Boolean): WinHandle {
+                val handle = CreateFileW(
+                    lpFileName = opt.path,
+                    dwDesiredAccess = if (input) GENERIC_READ else GENERIC_WRITE.toUInt(),
+                    dwShareMode = FILE_SHARE_DELETE.toUInt() or if (input) FILE_SHARE_READ.toUInt() else FILE_SHARE_WRITE.toUInt(),
+                    lpSecurityAttributes = null,
+                    dwCreationDisposition = CREATE_ALWAYS.toUInt(),
+                    dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL.toUInt(),
+                    hTemplateFile = null,
+                )
+                if (handle == INVALID_HANDLE_VALUE) {
+                    throwLastWinError(
+                        apiName = "CreateFileW",
+
+                        arguments = listOf("lpFileName" to opt.path),
+                    )
+                }
+                ensureHandleInherit(handle!!)
+                val wh = WinHandle(handle)
+                failCleanup.add { wh.close() }
+                successCleanup.add { wh.close() }
+                return wh
+            }
             try {
-                val subStdinHandle: HANDLE = when (processBuilder.stdin) {
+                val subStdinHandle: HANDLE = when (val stdin = processBuilder.stdin) {
                     ProcessIOHandler.INHERIT -> getStdHandle(STD_INPUT_HANDLE)
                     ProcessIOHandler.NULL -> NUL_HANDLE
                     ProcessIOHandler.PIPE -> {
@@ -89,10 +115,10 @@ internal class WinProcessImpl(
                         pipe.read.handle
                     }
 
-                    is ProcessIOHandler.Path -> TODO()
+                    is ProcessIOHandler.Path -> openFile(stdin, input = true).handle
                 }
 
-                val subStdoutHandle: HANDLE = when (processBuilder.stdout) {
+                val subStdoutHandle: HANDLE = when (val stdout = processBuilder.stdout) {
                     ProcessIOHandler.INHERIT -> getStdHandle(STD_OUTPUT_HANDLE)
                     ProcessIOHandler.NULL -> NUL_HANDLE
                     ProcessIOHandler.PIPE /*is ProcessOutHandler.Sink*/ -> {
@@ -103,13 +129,13 @@ internal class WinProcessImpl(
                         pipe.write.handle
                     }
 
-                    is ProcessIOHandler.Path -> TODO()
+                    is ProcessIOHandler.Path -> openFile(stdout, input = false).handle
                 }
 
                 val subStderrHandle: HANDLE = if (processBuilder.mergeStderrToStdout) {
                     subStdoutHandle
                 } else {
-                    when (processBuilder.stderr) {
+                    when (val stderr = processBuilder.stderr) {
                         ProcessIOHandler.INHERIT -> getStdHandle(STD_ERROR_HANDLE)
                         ProcessIOHandler.NULL -> NUL_HANDLE
                         ProcessIOHandler.PIPE /*is ProcessOutHandler.Sink*/ -> {
@@ -120,7 +146,7 @@ internal class WinProcessImpl(
                             pipe.write.handle
                         }
 
-                        is ProcessIOHandler.Path -> TODO()
+                        is ProcessIOHandler.Path -> openFile(stderr, input = false).handle
                     }
                 }
 

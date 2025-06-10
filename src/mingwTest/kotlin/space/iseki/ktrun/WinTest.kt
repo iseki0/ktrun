@@ -166,6 +166,17 @@ class WinTest {
         assertEquals(0, process.waitForExit(), "Process should exit with code 0")
     }
 
+    @Test
+    fun testFileOutput() {
+        val process = buildProcess {
+            cmdline = listOf("cmd", "/c", "echo Hello, file!")
+            stdout = file("output.txt")
+            stderr = nul()
+        }
+        val exitCode = process.waitForExit(1.seconds)
+        assertNotEquals(null, exitCode, "Process should have exited")
+    }
+
     @AfterTest
     fun checkHandleGC() {
         repeat(3) {
