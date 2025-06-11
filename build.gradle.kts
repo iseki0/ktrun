@@ -20,6 +20,7 @@ kotlin {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
     targets {
+        jvm {}
         mingwX64 {}
 //        linuxX64()
 //        linuxArm64()
