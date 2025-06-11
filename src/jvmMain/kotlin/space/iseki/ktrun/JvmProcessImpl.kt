@@ -55,8 +55,7 @@ internal class JvmProcessImpl(builder: ProcessBuilderScopeImpl) : Process {
         }
         when (val stdin = builder.stdin) {
             is ProcessIOHandler.Path -> pb.redirectInput(File(stdin.path))
-            ProcessIOHandler.NULL -> pb.redirectInput(ProcessBuilder.Redirect.DISCARD)
-            ProcessIOHandler.PIPE -> pb.redirectInput(ProcessBuilder.Redirect.PIPE)
+            ProcessIOHandler.PIPE, ProcessIOHandler.NULL -> pb.redirectInput(ProcessBuilder.Redirect.PIPE)
             ProcessIOHandler.INHERIT -> pb.redirectInput(ProcessBuilder.Redirect.INHERIT)
         }
         when (val stdout = builder.stdout) {
@@ -66,6 +65,9 @@ internal class JvmProcessImpl(builder: ProcessBuilderScopeImpl) : Process {
             ProcessIOHandler.INHERIT -> pb.redirectOutput(ProcessBuilder.Redirect.INHERIT)
         }
         this.jvmProcess = pb.start()
+        if (builder.stdin == ProcessIOHandler.NULL) {
+            jvmProcess.outputStream.close() // Ensure the output stream is closed
+        }
     }
 
     override val stdinPipe: Writable? = when (builder.stdin) {
