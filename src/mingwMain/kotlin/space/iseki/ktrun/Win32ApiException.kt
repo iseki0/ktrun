@@ -22,24 +22,27 @@ internal class Win32ApiException(
     val arguments: List<Pair<String, String>> = emptyList(),
 ) : RuntimeException() {
 
+    val formattedMessage: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        memScoped {
+            val v = alloc<LPTSTRVar>()
+            FormatMessageW(
+                dwFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER.toUInt() or FORMAT_MESSAGE_FROM_SYSTEM.toUInt() or FORMAT_MESSAGE_IGNORE_INSERTS.toUInt(),
+                lpSource = null,
+                dwMessageId = lastError,
+                dwLanguageId = 0u,
+                lpBuffer = v.ptr.reinterpret(),
+                nSize = 0u,
+                Arguments = null,
+            )
+            v.value?.toKStringFromUtf16()?.trim().orEmpty().also { LocalFree(v.value) }
+        }
+    }
+
     override val message: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         buildString {
             append("Win32 API call failed: $apiName")
-            val msg = memScoped {
-                val v = alloc<LPTSTRVar>()
-                FormatMessageW(
-                    dwFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER.toUInt() or FORMAT_MESSAGE_FROM_SYSTEM.toUInt() or FORMAT_MESSAGE_IGNORE_INSERTS.toUInt(),
-                    lpSource = null,
-                    dwMessageId = lastError,
-                    dwLanguageId = 0u,
-                    lpBuffer = v.ptr.reinterpret(),
-                    nSize = 0u,
-                    Arguments = null,
-                )
-                v.value?.toKStringFromUtf16().orEmpty().also { LocalFree(v.value) }
-            }
             append(": ")
-            append(msg)
+            append(formattedMessage)
             append(". error code: $lastError")
         }
     }
