@@ -1,5 +1,5 @@
 plugins {
-    kotlin("multiplatform") version "2.1.20"
+    kotlin("multiplatform") version "2.1.21"
     id("org.jetbrains.kotlinx.atomicfu") version "0.27.0"
 }
 
