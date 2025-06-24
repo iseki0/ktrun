@@ -12,7 +12,7 @@ class SyscallException(
     val errorCode: Int,
 ) : RuntimeException() {
     override val message: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        strerror(errorCode)?.toKStringFromUtf8().orEmpty()
+        "call: $call, errno: $errorCode, "+ strerror(errorCode)?.toKStringFromUtf8().orEmpty()
     }
 }
 

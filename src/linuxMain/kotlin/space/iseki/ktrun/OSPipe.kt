@@ -7,10 +7,12 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.get
+import kotlinx.cinterop.internal.CCall
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.reinterpret
 import platform.posix.O_CLOEXEC
 import kotlin.experimental.ExperimentalNativeApi
+
 
 internal class LinuxReadable(val fd: OsFd) : Readable {
     private val mutex = ReentrantLock()
@@ -67,7 +69,7 @@ internal class OSPipe: AutoCloseable {
 
     companion object {
         @OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
-        @CName("pipe2")
+        @CCall("pipe2")
         private external fun pipe2(fds: CPointer<IntVar>, flags: Int): Int
     }
 }

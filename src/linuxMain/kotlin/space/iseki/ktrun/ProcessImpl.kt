@@ -4,9 +4,11 @@ import kotlinx.cinterop.CValuesRef
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.alloc
+import kotlinx.cinterop.cstr
+import kotlinx.cinterop.internal.CCall
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
-import kotlinx.cinterop.toCStringArray
+import kotlinx.cinterop.toCValues
 import kotlinx.cinterop.value
 import platform.linux.posix_spawn
 import platform.linux.posix_spawn_file_actions_adddup2
@@ -26,7 +28,6 @@ import platform.posix.errno
 import platform.posix.open
 import platform.posix.pid_tVar
 import platform.posix.waitpid
-import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
 
 @OptIn(ExperimentalForeignApi::class)
@@ -110,14 +111,20 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                         dir = workingDirectory,
                     ).checkCallResult("posix_spawn_file_actions_addchdir")
                 }
-                spawnFn(
+
+                val r = spawnFn(
                     pidVar.ptr,
                     fname,
                     posixSpawnFileAction.ptr,
-                    null,
-                    cmdline.slice(1..cmdline.lastIndex).toCStringArray(memScope),
-                    pb.environment?.toList()?.map { (k, v) -> "$k=$v" }?.toCStringArray(memScope),
+                    posixSpawnAttr.ptr,
+                    (cmdline.map { it.cstr.getPointer(memScope) } + null).toCValues(),
+                    pb.environment?.toList()
+                        ?.map { (k, v) -> "$k=$v".cstr.getPointer(memScope) }
+                        ?.let { (it + null).toCValues() },
                 )
+                if (r != 0) {
+                    throw SyscallException("posix_spawn", errno)
+                }
                 pid = pidVar.value
                 var th: Throwable? = null
                 th = stdinPipePair?.r?.closeAddSuppressed(th)
@@ -164,12 +171,12 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
     }
 }
 
-@CName("posix_spawn_file_actions_addchdir")
-@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
-private external fun posix_spawn_file_actions_addchdir(
+//@CCall("posix_spawn_file_actions_addchdir")
+@OptIn(ExperimentalForeignApi::class)
+private fun posix_spawn_file_actions_addchdir(
     __file_actions: CValuesRef<posix_spawn_file_actions_t>,
-    dir: String,
-): Int
+    @CCall.CString dir: String,
+): Int = TODO()
 
 @OptIn(ExperimentalForeignApi::class)
 private fun posix_spawn_file_actions_t.adddup2(

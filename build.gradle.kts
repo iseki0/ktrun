@@ -25,6 +25,7 @@ kotlin {
     jvmToolchain(21)
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
+        freeCompilerArgs.add("-Xopt-in=kotlin.native.internal.InternalForKotlinNative")
     }
     jvm {
         compilerOptions {
