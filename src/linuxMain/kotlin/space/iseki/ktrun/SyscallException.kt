@@ -12,14 +12,18 @@ class SyscallException(
     val errorCode: Int,
 ) : RuntimeException() {
     override val message: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        "call: $call, errno: $errorCode, "+ strerror(errorCode)?.toKStringFromUtf8().orEmpty()
+        "call: $call, errno: $errorCode, " + strerror(errorCode)?.toKStringFromUtf8().orEmpty()
     }
 }
 
-internal fun Int.checkCallResult(call: String) {
-    when (this) {
-        ENOSYS -> throw UnsupportedOperationException("Unsupported syscall: $call")
-        ENOMEM -> throw OutOfMemoryError("Out of memory in $call")
-        else -> if (this != 0) throw SyscallException(call, this)
+internal fun translateErrno(call: String, errno: Int): Throwable {
+    return when (errno) {
+        ENOSYS -> UnsupportedOperationException("Unsupported syscall: $call")
+        ENOMEM -> OutOfMemoryError("Out of memory in $call")
+        else -> SyscallException(call, errno)
     }
+}
+
+internal fun failWithErrno(call: String, errno: Int) {
+    throw translateErrno(call, errno)
 }

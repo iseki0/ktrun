@@ -21,7 +21,7 @@ internal class OsFdImpl(override val fd: Int) : AutoCloseable, OsFd {
     private val closed = atomic(false)
     override fun close() {
         if (closed.compareAndSet(expect = false, update = true)) {
-            platform.posix.close(fd).checkCallResult("close")
+            if(platform.posix.close(fd) == -1) failWithErrno("close", platform.posix.errno)
         }
     }
 
