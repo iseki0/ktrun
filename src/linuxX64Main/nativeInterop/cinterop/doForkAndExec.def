@@ -1,0 +1,6 @@
+headerFilter = fork_and_exec.h
+headers = fork_and_exec.h
+compilerOpts = -Isrc/linuxX64Main/nativeInterop/cinterop
+staticLibraries = fork_and_exec.a
+libraryPaths = src/linuxX64Main/nativeInterop/cinterop
+noStringConversion = do_fork_and_exec

@@ -20,15 +20,12 @@ import kotlinx.cinterop.toCValues
 import platform.posix.O_CLOEXEC
 import platform.posix.SIGKILL
 import platform.posix.SIGRTMAX
-import platform.posix.SIGSTOP
 import platform.posix.SIG_IGN
 import platform.posix.SIG_SETMASK
 import platform.posix.STDERR_FILENO
 import platform.posix.STDIN_FILENO
 import platform.posix.STDOUT_FILENO
 import platform.posix._exit
-import platform.posix.close
-import platform.posix.closelog
 import platform.posix.dlsym
 import platform.posix.dup2
 import platform.posix.errno
@@ -39,6 +36,7 @@ import platform.posix.sigaction
 import platform.posix.sigfillset
 import platform.posix.sigset_t
 import platform.posix.write
+import space.iseki.ktrun.native.do_fork_and_exec
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
 
@@ -213,6 +211,23 @@ private fun doForkAndExec(
     envC: CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>?,
     execRPipe: Int,
 ): Int {
+    val r = do_fork_and_exec(
+        sub_stdin_fd = subStdinFd,
+        use_sub_stdin = subStdinFdSet,
+        sub_stdout_fd = subStdoutFd,
+        use_sub_stdout = subStdoutFdSet,
+        sub_stderr_fd = subStderrFd,
+        use_sub_stderr = subStderrFdSet,
+        working_dir = workingDirectoryC,
+        path = pathC,
+        argv = cmdlineC,
+        envp = envC,
+        exec_error_pipe = execRPipe,
+    )
+    if (errno != 0) {
+        failWithErrno("fork", errno)
+    }
+    return r
     memScoped {
         val sigsetVar = alloc<sigset_t>()
         val oldSigsetVar = alloc<sigset_t>()

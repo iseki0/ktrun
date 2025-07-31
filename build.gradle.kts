@@ -33,5 +33,21 @@ kotlin {
         }
     }
     mingwX64 {}
-    linuxX64()
+    linuxX64 {
+        compilations.getByName("main") {
+            val doForkAndExec by cinterops.creating {
+                definitionFile = file("src/linuxX64Main/nativeInterop/cinterop/doForkAndExec.def")
+                packageName = "space.iseki.ktrun.native"
+            }
+        }
+    }
+    linuxArm64 {
+        compilations.getByName("main") {
+            val doForkAndExec by cinterops.creating {
+                definitionFile = file("src/linuxArm64Main/nativeInterop/cinterop/doForkAndExec.def")
+                packageName = "space.iseki.ktrun.native"
+            }
+        }
+    }
 }
+
