@@ -1,5 +1,5 @@
 plugins {
-    kotlin("multiplatform") version "2.1.21"
+    kotlin("multiplatform") version "2.2.0"
     id("org.jetbrains.kotlinx.atomicfu") version "0.27.0"
 }
 
@@ -19,10 +19,8 @@ kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
-    targets {
-        jvm {}
-        mingwX64 {}
+    jvm {}
+    mingwX64 {}
 //        linuxX64()
 //        linuxArm64()
-    }
 }
