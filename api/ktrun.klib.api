@@ -1,0 +1,108 @@
+// Klib ABI Dump
+// Targets: [mingwX64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <space.iseki.ktrun:ktrun>
+abstract interface space.iseki.ktrun/Process { // space.iseki.ktrun/Process|null[0]
+    abstract val pid // space.iseki.ktrun/Process.pid|{}pid[0]
+        abstract fun <get-pid>(): kotlin/Long // space.iseki.ktrun/Process.pid.<get-pid>|<get-pid>(){}[0]
+    abstract val stderrPipe // space.iseki.ktrun/Process.stderrPipe|{}stderrPipe[0]
+        abstract fun <get-stderrPipe>(): space.iseki.ktrun/Readable? // space.iseki.ktrun/Process.stderrPipe.<get-stderrPipe>|<get-stderrPipe>(){}[0]
+    abstract val stdinPipe // space.iseki.ktrun/Process.stdinPipe|{}stdinPipe[0]
+        abstract fun <get-stdinPipe>(): space.iseki.ktrun/Writable? // space.iseki.ktrun/Process.stdinPipe.<get-stdinPipe>|<get-stdinPipe>(){}[0]
+    abstract val stdoutPipe // space.iseki.ktrun/Process.stdoutPipe|{}stdoutPipe[0]
+        abstract fun <get-stdoutPipe>(): space.iseki.ktrun/Readable? // space.iseki.ktrun/Process.stdoutPipe.<get-stdoutPipe>|<get-stdoutPipe>(){}[0]
+
+    abstract fun kill() // space.iseki.ktrun/Process.kill|kill(){}[0]
+    abstract fun waitForExit(kotlin.time/Duration = ...): kotlin/Int? // space.iseki.ktrun/Process.waitForExit|waitForExit(kotlin.time.Duration){}[0]
+}
+
+abstract interface space.iseki.ktrun/ProcessBuilderScope { // space.iseki.ktrun/ProcessBuilderScope|null[0]
+    abstract var cmdline // space.iseki.ktrun/ProcessBuilderScope.cmdline|{}cmdline[0]
+        abstract fun <get-cmdline>(): kotlin.collections/List<kotlin/String> // space.iseki.ktrun/ProcessBuilderScope.cmdline.<get-cmdline>|<get-cmdline>(){}[0]
+        abstract fun <set-cmdline>(kotlin.collections/List<kotlin/String>) // space.iseki.ktrun/ProcessBuilderScope.cmdline.<set-cmdline>|<set-cmdline>(kotlin.collections.List<kotlin.String>){}[0]
+    abstract var environment // space.iseki.ktrun/ProcessBuilderScope.environment|{}environment[0]
+        abstract fun <get-environment>(): kotlin.collections/Map<kotlin/String, kotlin/String>? // space.iseki.ktrun/ProcessBuilderScope.environment.<get-environment>|<get-environment>(){}[0]
+        abstract fun <set-environment>(kotlin.collections/Map<kotlin/String, kotlin/String>?) // space.iseki.ktrun/ProcessBuilderScope.environment.<set-environment>|<set-environment>(kotlin.collections.Map<kotlin.String,kotlin.String>?){}[0]
+    abstract var mergeStderrToStdout // space.iseki.ktrun/ProcessBuilderScope.mergeStderrToStdout|{}mergeStderrToStdout[0]
+        abstract fun <get-mergeStderrToStdout>(): kotlin/Boolean // space.iseki.ktrun/ProcessBuilderScope.mergeStderrToStdout.<get-mergeStderrToStdout>|<get-mergeStderrToStdout>(){}[0]
+        abstract fun <set-mergeStderrToStdout>(kotlin/Boolean) // space.iseki.ktrun/ProcessBuilderScope.mergeStderrToStdout.<set-mergeStderrToStdout>|<set-mergeStderrToStdout>(kotlin.Boolean){}[0]
+    abstract var stderr // space.iseki.ktrun/ProcessBuilderScope.stderr|{}stderr[0]
+        abstract fun <get-stderr>(): space.iseki.ktrun/ProcessOutHandler // space.iseki.ktrun/ProcessBuilderScope.stderr.<get-stderr>|<get-stderr>(){}[0]
+        abstract fun <set-stderr>(space.iseki.ktrun/ProcessOutHandler) // space.iseki.ktrun/ProcessBuilderScope.stderr.<set-stderr>|<set-stderr>(space.iseki.ktrun.ProcessOutHandler){}[0]
+    abstract var stdin // space.iseki.ktrun/ProcessBuilderScope.stdin|{}stdin[0]
+        abstract fun <get-stdin>(): space.iseki.ktrun/ProcessInHandler // space.iseki.ktrun/ProcessBuilderScope.stdin.<get-stdin>|<get-stdin>(){}[0]
+        abstract fun <set-stdin>(space.iseki.ktrun/ProcessInHandler) // space.iseki.ktrun/ProcessBuilderScope.stdin.<set-stdin>|<set-stdin>(space.iseki.ktrun.ProcessInHandler){}[0]
+    abstract var stdout // space.iseki.ktrun/ProcessBuilderScope.stdout|{}stdout[0]
+        abstract fun <get-stdout>(): space.iseki.ktrun/ProcessOutHandler // space.iseki.ktrun/ProcessBuilderScope.stdout.<get-stdout>|<get-stdout>(){}[0]
+        abstract fun <set-stdout>(space.iseki.ktrun/ProcessOutHandler) // space.iseki.ktrun/ProcessBuilderScope.stdout.<set-stdout>|<set-stdout>(space.iseki.ktrun.ProcessOutHandler){}[0]
+    abstract var workingDirectory // space.iseki.ktrun/ProcessBuilderScope.workingDirectory|{}workingDirectory[0]
+        abstract fun <get-workingDirectory>(): kotlin/String? // space.iseki.ktrun/ProcessBuilderScope.workingDirectory.<get-workingDirectory>|<get-workingDirectory>(){}[0]
+        abstract fun <set-workingDirectory>(kotlin/String?) // space.iseki.ktrun/ProcessBuilderScope.workingDirectory.<set-workingDirectory>|<set-workingDirectory>(kotlin.String?){}[0]
+}
+
+abstract interface space.iseki.ktrun/Readable : kotlin/AutoCloseable { // space.iseki.ktrun/Readable|null[0]
+    abstract fun read(kotlin/ByteArray, kotlin/Int = ..., kotlin/Int = ...): kotlin/Int // space.iseki.ktrun/Readable.read|read(kotlin.ByteArray;kotlin.Int;kotlin.Int){}[0]
+    open fun readNBytes(kotlin/ByteArray, kotlin/Int = ..., kotlin/Int = ...): kotlin/Int // space.iseki.ktrun/Readable.readNBytes|readNBytes(kotlin.ByteArray;kotlin.Int;kotlin.Int){}[0]
+
+    final object Companion // space.iseki.ktrun/Readable.Companion|null[0]
+}
+
+abstract interface space.iseki.ktrun/Writable : kotlin/AutoCloseable { // space.iseki.ktrun/Writable|null[0]
+    abstract fun write(kotlin/ByteArray, kotlin/Int = ..., kotlin/Int = ...): kotlin/Int // space.iseki.ktrun/Writable.write|write(kotlin.ByteArray;kotlin.Int;kotlin.Int){}[0]
+    open fun flush() // space.iseki.ktrun/Writable.flush|flush(){}[0]
+
+    final object Companion // space.iseki.ktrun/Writable.Companion|null[0]
+}
+
+sealed interface space.iseki.ktrun/ProcessIOHandler : space.iseki.ktrun/ProcessInHandler, space.iseki.ktrun/ProcessOutHandler { // space.iseki.ktrun/ProcessIOHandler|null[0]
+    final class Path : space.iseki.ktrun/ProcessIOHandler { // space.iseki.ktrun/ProcessIOHandler.Path|null[0]
+        constructor <init>(kotlin/String) // space.iseki.ktrun/ProcessIOHandler.Path.<init>|<init>(kotlin.String){}[0]
+
+        final val path // space.iseki.ktrun/ProcessIOHandler.Path.path|{}path[0]
+            final fun <get-path>(): kotlin/String // space.iseki.ktrun/ProcessIOHandler.Path.path.<get-path>|<get-path>(){}[0]
+
+        final fun component1(): kotlin/String // space.iseki.ktrun/ProcessIOHandler.Path.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): space.iseki.ktrun/ProcessIOHandler.Path // space.iseki.ktrun/ProcessIOHandler.Path.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // space.iseki.ktrun/ProcessIOHandler.Path.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // space.iseki.ktrun/ProcessIOHandler.Path.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // space.iseki.ktrun/ProcessIOHandler.Path.toString|toString(){}[0]
+    }
+
+    final object INHERIT : space.iseki.ktrun/ProcessIOHandler { // space.iseki.ktrun/ProcessIOHandler.INHERIT|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // space.iseki.ktrun/ProcessIOHandler.INHERIT.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // space.iseki.ktrun/ProcessIOHandler.INHERIT.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // space.iseki.ktrun/ProcessIOHandler.INHERIT.toString|toString(){}[0]
+    }
+
+    final object NULL : space.iseki.ktrun/ProcessIOHandler { // space.iseki.ktrun/ProcessIOHandler.NULL|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // space.iseki.ktrun/ProcessIOHandler.NULL.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // space.iseki.ktrun/ProcessIOHandler.NULL.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // space.iseki.ktrun/ProcessIOHandler.NULL.toString|toString(){}[0]
+    }
+
+    final object PIPE : space.iseki.ktrun/ProcessIOHandler { // space.iseki.ktrun/ProcessIOHandler.PIPE|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // space.iseki.ktrun/ProcessIOHandler.PIPE.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // space.iseki.ktrun/ProcessIOHandler.PIPE.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // space.iseki.ktrun/ProcessIOHandler.PIPE.toString|toString(){}[0]
+    }
+}
+
+sealed interface space.iseki.ktrun/ProcessInHandler // space.iseki.ktrun/ProcessInHandler|null[0]
+
+sealed interface space.iseki.ktrun/ProcessOutHandler // space.iseki.ktrun/ProcessOutHandler|null[0]
+
+open class space.iseki.ktrun/IOException : kotlin/Exception { // space.iseki.ktrun/IOException|null[0]
+    constructor <init>(kotlin/String?) // space.iseki.ktrun/IOException.<init>|<init>(kotlin.String?){}[0]
+    constructor <init>(kotlin/String?, kotlin/Throwable?) // space.iseki.ktrun/IOException.<init>|<init>(kotlin.String?;kotlin.Throwable?){}[0]
+    constructor <init>(kotlin/Throwable?) // space.iseki.ktrun/IOException.<init>|<init>(kotlin.Throwable?){}[0]
+}
+
+final fun (space.iseki.ktrun/ProcessBuilderScope).space.iseki.ktrun/file(kotlin/String): space.iseki.ktrun/ProcessIOHandler.Path // space.iseki.ktrun/file|file@space.iseki.ktrun.ProcessBuilderScope(kotlin.String){}[0]
+final fun (space.iseki.ktrun/ProcessBuilderScope).space.iseki.ktrun/inherit(): space.iseki.ktrun/ProcessIOHandler.INHERIT // space.iseki.ktrun/inherit|inherit@space.iseki.ktrun.ProcessBuilderScope(){}[0]
+final fun (space.iseki.ktrun/ProcessBuilderScope).space.iseki.ktrun/nul(): space.iseki.ktrun/ProcessIOHandler.NULL // space.iseki.ktrun/nul|nul@space.iseki.ktrun.ProcessBuilderScope(){}[0]
+final fun (space.iseki.ktrun/ProcessBuilderScope).space.iseki.ktrun/pipe(): space.iseki.ktrun/ProcessIOHandler.PIPE // space.iseki.ktrun/pipe|pipe@space.iseki.ktrun.ProcessBuilderScope(){}[0]
+final fun space.iseki.ktrun/buildProcess(kotlin/Function1<space.iseki.ktrun/ProcessBuilderScope, kotlin/Unit>): space.iseki.ktrun/Process // space.iseki.ktrun/buildProcess|buildProcess(kotlin.Function1<space.iseki.ktrun.ProcessBuilderScope,kotlin.Unit>){}[0]

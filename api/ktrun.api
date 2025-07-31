@@ -1,0 +1,117 @@
+public final class space/iseki/ktrun/IOKt {
+	public static final fun inputStream (Lspace/iseki/ktrun/Readable;)Ljava/io/InputStream;
+	public static final fun outputStream (Lspace/iseki/ktrun/Writable;)Ljava/io/OutputStream;
+}
+
+public abstract interface class space/iseki/ktrun/Process {
+	public abstract fun getPid ()J
+	public abstract fun getStderrPipe ()Lspace/iseki/ktrun/Readable;
+	public abstract fun getStdinPipe ()Lspace/iseki/ktrun/Writable;
+	public abstract fun getStdoutPipe ()Lspace/iseki/ktrun/Readable;
+	public abstract fun kill ()V
+	public abstract fun waitForExit-LRDsOJo (J)Ljava/lang/Integer;
+	public static synthetic fun waitForExit-LRDsOJo$default (Lspace/iseki/ktrun/Process;JILjava/lang/Object;)Ljava/lang/Integer;
+}
+
+public final class space/iseki/ktrun/Process$DefaultImpls {
+	public static synthetic fun waitForExit-LRDsOJo$default (Lspace/iseki/ktrun/Process;JILjava/lang/Object;)Ljava/lang/Integer;
+}
+
+public abstract interface class space/iseki/ktrun/ProcessBuilderScope {
+	public abstract fun getCmdline ()Ljava/util/List;
+	public abstract fun getEnvironment ()Ljava/util/Map;
+	public abstract fun getMergeStderrToStdout ()Z
+	public abstract fun getStderr ()Lspace/iseki/ktrun/ProcessOutHandler;
+	public abstract fun getStdin ()Lspace/iseki/ktrun/ProcessInHandler;
+	public abstract fun getStdout ()Lspace/iseki/ktrun/ProcessOutHandler;
+	public abstract fun getWorkingDirectory ()Ljava/lang/String;
+	public abstract fun setCmdline (Ljava/util/List;)V
+	public abstract fun setEnvironment (Ljava/util/Map;)V
+	public abstract fun setMergeStderrToStdout (Z)V
+	public abstract fun setStderr (Lspace/iseki/ktrun/ProcessOutHandler;)V
+	public abstract fun setStdin (Lspace/iseki/ktrun/ProcessInHandler;)V
+	public abstract fun setStdout (Lspace/iseki/ktrun/ProcessOutHandler;)V
+	public abstract fun setWorkingDirectory (Ljava/lang/String;)V
+}
+
+public final class space/iseki/ktrun/ProcessBuilderScopeKt {
+	public static final fun buildProcess (Lkotlin/jvm/functions/Function1;)Lspace/iseki/ktrun/Process;
+	public static final fun file (Lspace/iseki/ktrun/ProcessBuilderScope;Ljava/lang/String;)Lspace/iseki/ktrun/ProcessIOHandler$Path;
+	public static final fun inherit (Lspace/iseki/ktrun/ProcessBuilderScope;)Lspace/iseki/ktrun/ProcessIOHandler$INHERIT;
+	public static final fun nul (Lspace/iseki/ktrun/ProcessBuilderScope;)Lspace/iseki/ktrun/ProcessIOHandler$NULL;
+	public static final fun pipe (Lspace/iseki/ktrun/ProcessBuilderScope;)Lspace/iseki/ktrun/ProcessIOHandler$PIPE;
+}
+
+public abstract interface class space/iseki/ktrun/ProcessIOHandler : space/iseki/ktrun/ProcessInHandler, space/iseki/ktrun/ProcessOutHandler {
+}
+
+public final class space/iseki/ktrun/ProcessIOHandler$INHERIT : space/iseki/ktrun/ProcessIOHandler {
+	public static final field INSTANCE Lspace/iseki/ktrun/ProcessIOHandler$INHERIT;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class space/iseki/ktrun/ProcessIOHandler$NULL : space/iseki/ktrun/ProcessIOHandler {
+	public static final field INSTANCE Lspace/iseki/ktrun/ProcessIOHandler$NULL;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class space/iseki/ktrun/ProcessIOHandler$PIPE : space/iseki/ktrun/ProcessIOHandler {
+	public static final field INSTANCE Lspace/iseki/ktrun/ProcessIOHandler$PIPE;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class space/iseki/ktrun/ProcessIOHandler$Path : space/iseki/ktrun/ProcessIOHandler {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lspace/iseki/ktrun/ProcessIOHandler$Path;
+	public static synthetic fun copy$default (Lspace/iseki/ktrun/ProcessIOHandler$Path;Ljava/lang/String;ILjava/lang/Object;)Lspace/iseki/ktrun/ProcessIOHandler$Path;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class space/iseki/ktrun/ProcessInHandler {
+}
+
+public abstract interface class space/iseki/ktrun/ProcessOutHandler {
+}
+
+public abstract interface class space/iseki/ktrun/Readable : java/lang/AutoCloseable {
+	public static final field Companion Lspace/iseki/ktrun/Readable$Companion;
+	public abstract fun read ([BII)I
+	public static synthetic fun read$default (Lspace/iseki/ktrun/Readable;[BIIILjava/lang/Object;)I
+	public fun readNBytes ([BII)I
+	public static synthetic fun readNBytes$default (Lspace/iseki/ktrun/Readable;[BIIILjava/lang/Object;)I
+}
+
+public final class space/iseki/ktrun/Readable$Companion {
+}
+
+public final class space/iseki/ktrun/Readable$DefaultImpls {
+	public static synthetic fun read$default (Lspace/iseki/ktrun/Readable;[BIIILjava/lang/Object;)I
+	public static fun readNBytes (Lspace/iseki/ktrun/Readable;[BII)I
+	public static synthetic fun readNBytes$default (Lspace/iseki/ktrun/Readable;[BIIILjava/lang/Object;)I
+}
+
+public abstract interface class space/iseki/ktrun/Writable : java/lang/AutoCloseable {
+	public static final field Companion Lspace/iseki/ktrun/Writable$Companion;
+	public fun flush ()V
+	public abstract fun write ([BII)I
+	public static synthetic fun write$default (Lspace/iseki/ktrun/Writable;[BIIILjava/lang/Object;)I
+}
+
+public final class space/iseki/ktrun/Writable$Companion {
+}
+
+public final class space/iseki/ktrun/Writable$DefaultImpls {
+	public static fun flush (Lspace/iseki/ktrun/Writable;)V
+	public static synthetic fun write$default (Lspace/iseki/ktrun/Writable;[BIIILjava/lang/Object;)I
+}
+
