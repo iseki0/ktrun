@@ -19,10 +19,12 @@
  * @param pipe_fd The write-end of the error reporting pipe.
  * @param error_code The value of `errno` from the failed system call.
  */
-static void write_error_and_exit(int pipe_fd, int error_code) {
+static void write_error_and_exit(int pipe_fd, int error_code, int location) {
     // Attempt to write the error code to the pipe. The parent will read this.
     // We can't do much if this write fails, as we are already in an error state.
     write(pipe_fd, &error_code, sizeof(error_code));
+
+    write(pipe_fd, &location, sizeof(location));
 
     // Exit with the error code. While the parent primarily uses the pipe to
     // detect failure, this exit code could be useful for debugging.
@@ -59,7 +61,8 @@ int do_fork_and_exec(
     const char *path,
     char *const argv[],
     char *const envp[],
-    int exec_error_pipe)
+    int exec_error_pipe,
+    char **err_step)
 {
     sigset_t new_mask, old_mask;
     pid_t pid;
@@ -68,11 +71,11 @@ int do_fork_and_exec(
     // Block all signals to prevent signal handlers from running in the child
     // between fork() and exec(). This is a standard safety measure.
     if (sigfillset(&new_mask) == -1) {
-        perror("sigfillset");
+        *err_step = "sigfillset";
         return -1;
     }
     if (pthread_sigmask(SIG_SETMASK, &new_mask, &old_mask) != 0) {
-        perror("pthread_sigmask");
+        *err_step = "pthread_sigmask";
         return -1;
     }
 
@@ -84,18 +87,18 @@ int do_fork_and_exec(
 
         // Redirect stdin, stdout, and stderr as requested.
         if (use_sub_stdin && dup2(sub_stdin_fd, STDIN_FILENO) == -1) {
-            write_error_and_exit(exec_error_pipe, errno);
+            write_error_and_exit(exec_error_pipe, errno, 0);
         }
         if (use_sub_stdout && dup2(sub_stdout_fd, STDOUT_FILENO) == -1) {
-            write_error_and_exit(exec_error_pipe, errno);
+            write_error_and_exit(exec_error_pipe, errno, 0);
         }
         if (use_sub_stderr && dup2(sub_stderr_fd, STDERR_FILENO) == -1) {
-            write_error_and_exit(exec_error_pipe, errno);
+            write_error_and_exit(exec_error_pipe, errno, 0);
         }
 
         // Change working directory if one was provided.
         if (working_dir != NULL && chdir(working_dir) == -1) {
-            write_error_and_exit(exec_error_pipe, errno);
+            write_error_and_exit(exec_error_pipe, errno, 2);
         }
 
         // Reset all signal handlers to be ignored, mimicking the original code's logic.
@@ -114,7 +117,7 @@ int do_fork_and_exec(
 
         // Restore the original signal mask before executing the new program.
         if (pthread_sigmask(SIG_SETMASK, &old_mask, NULL) != 0) {
-            write_error_and_exit(exec_error_pipe, errno);
+            write_error_and_exit(exec_error_pipe, errno, 0);
         }
 
         // Execute the new program.
@@ -126,7 +129,7 @@ int do_fork_and_exec(
 
         // If execvp/execvpe returns, an error has occurred.
         // Report the error to the parent via the pipe and exit.
-        write_error_and_exit(exec_error_pipe, errno);
+        write_error_and_exit(exec_error_pipe, errno, 1);
     }
 
     // --- Parent Process ---
@@ -141,6 +144,7 @@ int do_fork_and_exec(
     // Check if the fork() call itself failed.
     if (pid == -1) {
         errno = fork_errno;
+        *err_step = "fork";
         return -1;
     }
 

@@ -7,5 +7,5 @@ int do_fork_and_exec(
     const char *path,
     char *const argv[],
     char *const envp[],
-    int exec_error_pipe);
-
+    int exec_error_pipe,
+    char **err_step);

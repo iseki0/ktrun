@@ -2,7 +2,6 @@ package space.iseki.ktrun
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ByteVarOf
-import kotlinx.cinterop.CFunction
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.CPointerVarOf
 import kotlinx.cinterop.CValuesRef
@@ -11,56 +10,19 @@ import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.get
-import kotlinx.cinterop.invoke
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
-import kotlinx.cinterop.set
 import kotlinx.cinterop.toCValues
+import kotlinx.cinterop.toKStringFromUtf8
+import kotlinx.cinterop.value
 import platform.posix.O_CLOEXEC
 import platform.posix.SIGKILL
-import platform.posix.SIGRTMAX
-import platform.posix.SIG_IGN
-import platform.posix.SIG_SETMASK
-import platform.posix.STDERR_FILENO
-import platform.posix.STDIN_FILENO
-import platform.posix.STDOUT_FILENO
-import platform.posix._exit
-import platform.posix.dlsym
-import platform.posix.dup2
 import platform.posix.errno
-import platform.posix.fork
 import platform.posix.open
-import platform.posix.pthread_sigmask
-import platform.posix.sigaction
-import platform.posix.sigfillset
-import platform.posix.sigset_t
-import platform.posix.write
 import space.iseki.ktrun.native.do_fork_and_exec
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
-
-
-@OptIn(ExperimentalForeignApi::class)
-private typealias ExecvpFn = CPointer<CFunction<(CPointer<ByteVar>, CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>) -> Int>>
-
-@OptIn(ExperimentalForeignApi::class)
-private typealias ExecvpeFn = CPointer<CFunction<(CPointer<ByteVar>, CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>, CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>) -> Int>>
-
-@OptIn(ExperimentalForeignApi::class)
-private typealias ChdirFn = CPointer<CFunction<(CPointer<ByteVar>) -> Int>>
-
-@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
-private val execvpFn: ExecvpFn =
-    runCatching { dlsym(null, "execvp")!! }.getOrElse(::terminateWithUnhandledException).reinterpret()
-
-@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
-private val execvpeFn: ExecvpeFn =
-    runCatching { dlsym(null, "execvpe")!! }.getOrElse(::terminateWithUnhandledException).reinterpret()
-
-@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
-private val chdirFn: ChdirFn =
-    runCatching { dlsym(null, "chdir")!! }.getOrElse(::terminateWithUnhandledException).reinterpret()
 
 @OptIn(ExperimentalForeignApi::class)
 internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
@@ -80,10 +42,12 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
             var subStdoutFdSet = false
             var subStderrFd = 0
             var subStderrFdSet = false
-            val workingDirectoryC = pb.workingDirectory?.cstr?.getPointer(memScope)
+            val workingDirectory = pb.workingDirectory
+            val workingDirectoryC = workingDirectory?.cstr?.getPointer(memScope)
             val execRPipe = OSPipe()
             val pathC = pb.cmdline[0].cstr.getPointer(memScope)
-            val cmdlineC = pb.cmdline.toList().map { it.cstr.ptr.getPointer(memScope) }.let { it + null }.toCValues()
+            val cmdline = pb.cmdline.toList()
+            val cmdlineC = (cmdline.map { it.cstr.ptr.getPointer(memScope) } + null).toCValues()
             val envC = pb.environment?.toList()
                 ?.map { (k, v) -> "$k=$v".cstr.getPointer(memScope) }
                 ?.let { it + null }
@@ -165,11 +129,21 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                 stdinPipePair?.r?.close()
                 stdoutPipePair?.w?.close()
                 stderrPipePair?.w?.close()
-                val buf = ByteArray(8)
-                val n = LinuxReadable(execRPipe.r).readNBytes(buf)
-                if (n == 4) {
-                    val n = buf.toCValues().ptr.getPointer(memScope).reinterpret<IntVar>()[0]
-                    throw SyscallException("sub_process", n)
+                run {
+                    val buf = ByteArray(8)
+                    LinuxReadable(execRPipe.r).readNBytes(buf)
+                    val iv = buf.toCValues().ptr.getPointer(memScope).reinterpret<IntVar>()
+                    val errno = iv[0]
+                    if (errno != 0) {
+                        val location = iv[1]
+                        val locFile = when (location) {
+                            1 -> cmdline[0]
+                            2 -> workingDirectory ?: "<CURRENT_WORKDIR>"
+                            else -> null
+                        }
+                        if (locFile != null) throw translateFsError("subprocess", errno, locFile)
+                        throw translateErrno("fork_and_exec", errno)
+                    }
                 }
             } catch (th: Throwable) {
                 execRPipe.closeAddSuppressed(th)
@@ -211,96 +185,29 @@ private fun doForkAndExec(
     envC: CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>?,
     execRPipe: Int,
 ): Int {
-    val r = do_fork_and_exec(
-        sub_stdin_fd = subStdinFd,
-        use_sub_stdin = subStdinFdSet,
-        sub_stdout_fd = subStdoutFd,
-        use_sub_stdout = subStdoutFdSet,
-        sub_stderr_fd = subStderrFd,
-        use_sub_stderr = subStderrFdSet,
-        working_dir = workingDirectoryC,
-        path = pathC,
-        argv = cmdlineC,
-        envp = envC,
-        exec_error_pipe = execRPipe,
-    )
-    if (errno != 0) {
-        failWithErrno("fork", errno)
+    val r: Int
+    memScoped {
+        val sPtr = alloc<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>()
+        r = do_fork_and_exec(
+            sub_stdin_fd = subStdinFd,
+            use_sub_stdin = subStdinFdSet,
+            sub_stdout_fd = subStdoutFd,
+            use_sub_stdout = subStdoutFdSet,
+            sub_stderr_fd = subStderrFd,
+            use_sub_stderr = subStderrFdSet,
+            working_dir = workingDirectoryC,
+            path = pathC,
+            argv = cmdlineC,
+            envp = envC,
+            exec_error_pipe = execRPipe,
+            err_step = sPtr.ptr,
+        )
+        val errnoValue = errno
+        val errStep = sPtr.value?.toKStringFromUtf8()
+        if (errStep != null) {
+            failWithErrno(errStep, errnoValue)
+        }
     }
     return r
-    memScoped {
-        val sigsetVar = alloc<sigset_t>()
-        val oldSigsetVar = alloc<sigset_t>()
-        val sigactionVar = alloc<sigaction>()
-        val execRBuf = alloc<IntVar>().ptr.getPointer(memScope)
-        val execRBufPtr: CPointer<ByteVar> = execRBuf.reinterpret()
-        if (sigfillset(__set = sigsetVar.ptr) == -1) failWithErrno("sigfillset", errno)
-        if (pthread_sigmask(
-                __how = SIG_SETMASK,
-                __newmask = sigsetVar.ptr,
-                __oldmask = oldSigsetVar.ptr,
-            ) == -1
-        ) failWithErrno("pthread_sigmask", errno)
-        val pid = fork()
-        val forkErrno = errno
-        if (pid == 0) {
-            // !!! subprocess !!!
-            if (subStdinFdSet) {
-                if (dup2(subStdinFd, STDIN_FILENO) == -1) {
-                    writeCodeAndExit(execRPipe, execRBuf, execRBufPtr, errno)
-                }
-            }
-            if (subStdoutFdSet) {
-                if (dup2(subStdoutFd, STDOUT_FILENO) == -1) {
-                    writeCodeAndExit(execRPipe, execRBuf, execRBufPtr, errno)
-                }
-            }
-            if (subStderrFdSet) {
-                if (dup2(subStderrFd, STDERR_FILENO) == -1) {
-                    writeCodeAndExit(execRPipe, execRBuf, execRBufPtr, errno)
-                }
-            }
-            if (workingDirectoryC != null) {
-                if (chdirFn(workingDirectoryC) == -1) {
-                    writeCodeAndExit(execRPipe, execRBuf, execRBufPtr, errno)
-                }
-            }
-            for (i in 1..SIGRTMAX) {
-                sigactionVar.__sigaction_handler.sa_handler = SIG_IGN
-                // ignore sigaction error, not only for SIGKILL and SIGSTOP.
-                // https://bugzilla.redhat.com/show_bug.cgi?id=53394
-                sigaction(i, sigactionVar.ptr, null)
-            }
-            if (pthread_sigmask(SIG_SETMASK, oldSigsetVar.ptr, null) == -1) {
-                writeCodeAndExit(execRPipe, execRBuf, execRBufPtr, errno)
-            }
-            if (envC == null) {
-                if (execvpFn(pathC, cmdlineC) == -1) {
-                    writeCodeAndExit(execRPipe, execRBuf, execRBufPtr, errno)
-                }
-            } else {
-                if (execvpeFn(pathC, cmdlineC, envC) == -1) {
-                    writeCodeAndExit(execRPipe, execRBuf, execRBufPtr, errno)
-                }
-            }
-        }
-        if (pthread_sigmask(SIG_SETMASK, oldSigsetVar.ptr, null) == -1) {
-            terminateWithUnhandledException(SyscallException("pthread_sigmask", errno))
-        }
-        if (forkErrno == -1) failWithErrno("fork", forkErrno)
-        return pid
-    }
 }
 
-@OptIn(ExperimentalForeignApi::class)
-private fun writeCodeAndExit(
-    execRPipe: Int,
-    execRBuf: CPointer<IntVar>,
-    execRBufPtr: CPointer<ByteVar /* = ByteVarOf<Byte> */>,
-    no: Int,
-) {
-    val errno = errno
-    execRBuf[0] = errno
-    write(execRPipe, execRBufPtr, 4u)
-    _exit(errno)
-}
