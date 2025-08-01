@@ -2,23 +2,19 @@ package space.iseki.ktrun
 
 import kotlinx.atomicfu.locks.ReentrantLock
 import kotlinx.atomicfu.locks.withLock
-import kotlinx.cinterop.CFunction
-import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
-import kotlinx.cinterop.invoke
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import platform.posix.EINTR
 import platform.posix.O_CLOEXEC
-import platform.posix.dlsym
 import platform.posix.errno
-import kotlin.experimental.ExperimentalNativeApi
+import space.iseki.ktrun.native.pipe2
 
 @OptIn(ExperimentalForeignApi::class)
 internal class LinuxReadable(val fd: OsFd) : Readable {
@@ -67,7 +63,24 @@ internal class LinuxWritable(val fd: OsFd) : Writable {
     @OptIn(ExperimentalForeignApi::class)
     override fun write(buf: ByteArray, offset: Int, length: Int): Int {
         Writable.checkBounds(buf, offset, length)
-        TODO()
+        var written = 0
+        while (written < length) {
+            mutex.withLock {
+                val n = platform.posix.write(
+                    fd.fd,
+                    buf.usePinned { it.addressOf(offset + written) },
+                    (length - written).convert()
+                ).toInt()
+                if (n < 1) {
+                    when (errno) {
+                        EINTR -> {} // Retry on interrupt
+                        else -> throw translateErrno("write", errno)
+                    }
+                }
+                written += n
+            }
+        }
+        return written
     }
 }
 
@@ -79,7 +92,7 @@ internal class OSPipe : AutoCloseable {
     init {
         memScoped {
             val fds = allocArray<IntVar>(2)
-            if (pipe2Fn(fds.reinterpret(), O_CLOEXEC) == -1) failWithErrno("pipe2", errno)
+            if (pipe2(fds.reinterpret(), O_CLOEXEC) == -1) failWithErrno("pipe2", errno)
             r = OsFd(fds[0])
             w = OsFd(fds[1])
         }
@@ -98,10 +111,3 @@ internal class OSPipe : AutoCloseable {
         return th
     }
 }
-
-@OptIn(ExperimentalForeignApi::class)
-private typealias Pipe2Fn = CPointer<CFunction<(CPointer<IntVar>, Int) -> Int>>
-
-@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
-private val pipe2Fn: Pipe2Fn =
-    runCatching { dlsym(null, "pipe2")!! }.getOrElse(::terminateWithUnhandledException).reinterpret()

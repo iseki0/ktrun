@@ -10,3 +10,5 @@ int do_fork_and_exec(
     char *const envp[],
     int exec_error_pipe,
     char **err_step);
+
+int pipe2(int pipefd[2], int flags);

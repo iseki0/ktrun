@@ -3,6 +3,7 @@ package space.iseki.ktrun
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.toKStringFromUtf8
 import platform.posix.EACCES
+import platform.posix.EIO
 import platform.posix.EISDIR
 import platform.posix.ENOENT
 import platform.posix.ENOMEM
@@ -28,6 +29,7 @@ private fun tryTranslateErrno(call: String, errno: Int): Throwable? {
     return when (errno) {
         ENOSYS -> UnsupportedOperationException("Unsupported syscall: $call")
         ENOMEM -> OutOfMemoryError("Out of memory in $call")
+        EIO -> IOException("I/O error in $call")
         else -> null
     }
 }
