@@ -138,7 +138,8 @@ int do_fork_and_exec(
     if (pthread_sigmask(SIG_SETMASK, &old_mask, NULL) != 0) {
         // A failure here is critical and unrecoverable for the parent.
         perror("pthread_sigmask (parent)");
-        exit(EXIT_FAILURE);
+        abort();
+        _exit(EXIT_FAILURE);
     }
 
     // Check if the fork() call itself failed.

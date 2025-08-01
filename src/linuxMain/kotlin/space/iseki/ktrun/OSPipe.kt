@@ -55,13 +55,19 @@ internal class LinuxReadable(val fd: OsFd) : Readable {
 internal class LinuxWritable(val fd: OsFd) : Writable {
     private val mutex = ReentrantLock()
     private var closed = false
+
     override fun close() {
         if (closed) return
-        mutex.withLock { fd.close();closed = true }
+        mutex.withLock {
+            fd.close()
+            closed = true
+        }
     }
 
+    @OptIn(ExperimentalForeignApi::class)
     override fun write(buf: ByteArray, offset: Int, length: Int): Int {
-        TODO("Not yet implemented")
+        Writable.checkBounds(buf, offset, length)
+        TODO()
     }
 }
 
