@@ -10,6 +10,7 @@ import platform.posix.ENOMEM
 import platform.posix.ENOSYS
 import platform.posix.ENOTDIR
 import platform.posix.EPERM
+import kotlin.experimental.ExperimentalNativeApi
 
 class SyscallException(
     val call: String,
@@ -34,17 +35,22 @@ private fun tryTranslateErrno(call: String, errno: Int): Throwable? {
     }
 }
 
-internal fun translateFsError(call: String,errno: Int, file: String) = when(errno) {
+internal fun translateFsErrorNoThrow(call: String, errno: Int, file: String) = when(errno) {
     EACCES, EPERM, EISDIR -> AccessDeniedException(file, null, strerror(errno))
     ENOENT -> NoSuchFileException(file, null, strerror(errno))
     ENOTDIR -> NotDirectoryException(file)
-    else -> translateErrno(call, errno)
+    else -> translateErrnoNoThrow(call, errno)
 }
 
-internal fun translateErrno(call: String, errno: Int): Throwable {
+internal fun translateErrnoNoThrow(call: String, errno: Int): Throwable {
     return tryTranslateErrno(call, errno) ?: SyscallException(call, errno)
 }
 
 internal fun failWithErrno(call: String, errno: Int): Nothing {
-    throw translateErrno(call, errno)
+    throw translateErrnoNoThrow(call, errno)
+}
+
+@OptIn(ExperimentalNativeApi::class)
+internal fun panicWithErrno(call: String, errno:Int): Nothing {
+    terminateWithUnhandledException(translateErrnoNoThrow(call, errno))
 }

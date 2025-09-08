@@ -8,6 +8,7 @@ import kotlinx.cinterop.CValuesRef
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.alloc
+import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
@@ -16,10 +17,16 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCValues
 import kotlinx.cinterop.toKStringFromUtf8
 import kotlinx.cinterop.value
+import platform.posix.EINTR
 import platform.posix.O_CLOEXEC
 import platform.posix.SIGKILL
+import platform.posix.close
 import platform.posix.errno
 import platform.posix.open
+import platform.posix.poll
+import platform.posix.pollfd
+import platform.posix.syscall
+import space.iseki.ktrun.native.clone_args
 import space.iseki.ktrun.native.do_fork_and_exec
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
@@ -30,6 +37,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
     override val stdoutPipe: Readable?
     override val stderrPipe: Readable?
     override val pid: Long
+    val pidfd: OsFd
 
     init {
         memScoped {
@@ -112,7 +120,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                         is ProcessIOHandler.Path -> TODO()
                     }
                 }
-                this@ProcessImpl.pid = doForkAndExec(
+                val r = doForkAndExec(
                     subStdinFd = subStdinFd,
                     subStdinFdSet = subStdinFdSet,
                     subStdoutFd = subStdoutFd,
@@ -124,27 +132,14 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                     cmdlineC = cmdlineC,
                     envC = envC,
                     execRPipe = execRPipe.w.fd,
-                ).toLong()
+                )
+                this@ProcessImpl.pid = r.pid.toLong()
+                this@ProcessImpl.pidfd = r.pidfd
                 execRPipe.w.close()
                 stdinPipePair?.r?.close()
                 stdoutPipePair?.w?.close()
                 stderrPipePair?.w?.close()
-                run {
-                    val buf = ByteArray(8)
-                    LinuxReadable(execRPipe.r).readNBytes(buf)
-                    val iv = buf.toCValues().ptr.getPointer(memScope).reinterpret<IntVar>()
-                    val errno = iv[0]
-                    if (errno != 0) {
-                        val location = iv[1]
-                        val locFile = when (location) {
-                            1 -> cmdline[0]
-                            2 -> workingDirectory ?: "<CURRENT_WORKDIR>"
-                            else -> null
-                        }
-                        if (locFile != null) throw translateFsError("subprocess", errno, locFile)
-                        throw translateErrno("fork_and_exec", errno)
-                    }
-                }
+                throwSubprocessErrno(execRPipe.r, cmdline[0], workingDirectory)
             } catch (th: Throwable) {
                 execRPipe.closeAddSuppressed(th)
                 stdinPipePair?.closeAddSuppressed(th)
@@ -157,7 +152,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
 
     companion object {
         private val NUL_DEV: Int = open("/dev/null", O_CLOEXEC).also {
-            if (it == 0) throw SyscallException("open", errno)
+            if (it == 0) failWithErrno("open", errno)
         }
 
     }
@@ -166,10 +161,57 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
         if (platform.posix.kill(pid.toInt(), SIGKILL) == -1) throw SyscallException("kill", errno)
     }
 
-    override fun waitForExit(dur: Duration): Int? {
-        TODO("Not yet implemented")
+    override fun waitForExit(dur: Duration): Int {
+        memScoped {
+            val pollfd = allocArray<pollfd>(1)
+            val fd = syscall(SYS_pidfd_open, this@ProcessImpl.pid, 0)
+            if (fd == -1L) failWithErrno("pidfd_open", errno)
+            try {
+                check(fd <= Int.MAX_VALUE) { "pidfd_open returned a file descriptor larger than Int.MAX_VALUE: $fd" }
+                pollfd[0].fd = fd.toInt()
+                waitHelper(dur) {
+                    val dur = it.inWholeMilliseconds
+                    val r = poll(pollfd, 1uL, dur.toInt())
+                    if (r < 0) {
+                        val errno = errno
+                        if (errno == EINTR) return@waitHelper false
+                        failWithErrno("pollfd", errno)
+                    }
+                    if (r == 0) return@waitHelper false
+                    TODO()
+                }
+                TODO()
+            } finally {
+                val r = close(fd.toInt())
+                if (r == -1) panicWithErrno("pidfd_open", errno)
+            }
+        }
     }
 }
+
+@OptIn(ExperimentalForeignApi::class)
+private fun throwSubprocessErrno(subProcessPipe: OsFd, exe: String, wd: String?) {
+    val buf = ByteArray(8)
+    LinuxReadable(subProcessPipe).readNBytes(buf)
+    memScoped {
+        val iv = buf.toCValues().ptr.getPointer(memScope).reinterpret<IntVar>()
+        val errno = iv[0]
+        if (errno == 0) return
+        val location = iv[1]
+        val locFile = when (location) {
+            1 -> exe
+            2 -> wd ?: "<CURRENT_WORKDIR>"
+            else -> null
+        }
+        if (locFile != null) throw translateFsErrorNoThrow("subprocess", errno, locFile)
+        throw translateErrnoNoThrow("subprocess", errno)
+    }
+}
+
+private class ForkAndExecResult(
+    val pid: Int,
+    val pidfd: OsFd,
+)
 
 @OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
 private fun doForkAndExec(
@@ -184,11 +226,14 @@ private fun doForkAndExec(
     cmdlineC: CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>,
     envC: CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>?,
     execRPipe: Int,
-): Int {
-    val r: Int
+): ForkAndExecResult {
     memScoped {
+        val ca = alloc<clone_args>()
+        val pidfd = alloc<IntVar>()
+        ca.pidfd = pidfd.ptr.reinterpret()
+        ca.flags = CLONE_PIDFD
         val sPtr = alloc<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>()
-        r = do_fork_and_exec(
+        val r = do_fork_and_exec(
             sub_stdin_fd = subStdinFd,
             use_sub_stdin = subStdinFdSet,
             sub_stdout_fd = subStdoutFd,
@@ -201,13 +246,16 @@ private fun doForkAndExec(
             envp = envC,
             exec_error_pipe = execRPipe,
             err_step = sPtr.ptr,
+            ca = ca.ptr,
         )
         val errnoValue = errno
         val errStep = sPtr.value?.toKStringFromUtf8()
         if (errStep != null) {
             failWithErrno(errStep, errnoValue)
         }
+        return ForkAndExecResult(pid =  r, pidfd = OsFd(pidfd.value))
     }
-    return r
 }
 
+private const val SYS_pidfd_open = 434L
+private const val CLONE_PIDFD = 0x00001000uL

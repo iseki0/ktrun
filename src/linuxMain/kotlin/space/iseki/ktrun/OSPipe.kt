@@ -39,7 +39,7 @@ internal class LinuxReadable(val fd: OsFd) : Readable {
                 if (r < 0) {
                     when (errno) {
                         EINTR -> return@withLock // continue
-                        else -> throw IOException(translateErrno("read", errno))
+                        else -> throw IOException(translateErrnoNoThrow("read", errno))
                     }
                 }
                 return r
@@ -74,7 +74,7 @@ internal class LinuxWritable(val fd: OsFd) : Writable {
                 if (n < 1) {
                     when (errno) {
                         EINTR -> {} // Retry on interrupt
-                        else -> throw translateErrno("write", errno)
+                        else -> throw translateErrnoNoThrow("write", errno)
                     }
                 }
                 written += n

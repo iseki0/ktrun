@@ -1,13 +1,29 @@
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/syscall.h>
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <pthread.h>
 
+
+struct clone_args {
+  uint64_t flags;
+  uint64_t pidfd;
+  uint64_t child_tid;
+  uint64_t parent_tid;
+  uint64_t exit_signal;
+  uint64_t stack;
+  uint64_t stack_size;
+  uint64_t tls;
+  uint64_t set_tid;
+  uint64_t set_tid_size;
+  uint64_t cgroup;
+};
 
 /**
  * @brief Helper function for the child process to report an error and exit.
@@ -62,7 +78,8 @@ int do_fork_and_exec(
     char *const argv[],
     char *const envp[],
     int exec_error_pipe,
-    char **err_step)
+    char **err_step,
+    struct clone_args *ca)
 {
     sigset_t new_mask, old_mask;
     pid_t pid;
@@ -79,7 +96,7 @@ int do_fork_and_exec(
         return -1;
     }
 
-    pid = fork();
+    pid = syscall(SYS_clone3, ca, sizeof(*ca));
     fork_errno = errno; // Save errno immediately, as other calls might change it.
 
     if (pid == 0) {
@@ -145,7 +162,7 @@ int do_fork_and_exec(
     // Check if the fork() call itself failed.
     if (pid == -1) {
         errno = fork_errno;
-        *err_step = "fork";
+        *err_step = "clone";
         return -1;
     }
 
