@@ -13,9 +13,57 @@
 #define MFD_CLOEXEC 0x0001U
 #define SYS_memfd_create			319
 
+extern const char *const _binary_linux_spawn_helper_bin_start;
+extern const char *const _binary_linux_spawn_helper_bin_end;
+extern const int _binary_linux_spawn_helper_bin_size;
 
-int sendSpawnRequest(char *debugName, char *file, char **argv, char **envp, int envpSet, int errFd,
-                     int stdinFd, int stdoutFd, int stderrFd) {
+int binaryMemFd = -1;
+
+int initHelper() {
+    // load binary to memfd
+    const int memfd = MUST_OK(syscall(SYS_memfd_create, "spawn_helper", MFD_CLOEXEC));
+    MUST_OK(ftruncate(memfd, _binary_linux_spawn_helper_bin_size));
+    const void *const p = MMAP_MUST_OK(mmap(NULL, _binary_linux_spawn_helper_bin_size, PROT_READ | PROT_WRITE,
+        MAP_SHARED, memfd, 0));
+    memcpy((void *) p, _binary_linux_spawn_helper_bin_start, _binary_linux_spawn_helper_bin_size);
+    MUST_OK(munmap((void *) p, _binary_linux_spawn_helper_bin_size));
+    binaryMemFd = memfd;
+    return 0;
+}
+
+int startHelper(int *udsFd, int *helperPid) {
+    errno = 0;
+    int fds[2] = {0};
+    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, fds) == -1) {
+        return -1;
+    }
+    const int pid = fork();
+    if (pid == -1) {
+        const int e = errno;
+        close(fds[0]);
+        close(fds[1]);
+        errno = e;
+        return -1;
+    }
+    if (pid == 0) {
+        // children
+        if (dup2(fds[1], COMM_FD_UDS) == -1) {
+            _exit(1);
+        };
+        char *argv[] = {"spawn_helper", NULL};
+        extern char **environ;
+        if (fexecve(binaryMemFd, argv, environ) == -1) perror("fexecve failed");
+        _exit(1);
+    }
+    // parent
+    close(fds[1]);
+    *udsFd = fds[0];
+    *helperPid = pid;
+    return 0;
+}
+
+int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, int envpSet, char *cwd,
+                     int errFd, int stdinFd, int stdoutFd, int stderrFd) {
     REQUIRE_NOT_NULL(file);
     REQUIRE_NOT_NULL(argv);
     errno = 0;
@@ -23,21 +71,23 @@ int sendSpawnRequest(char *debugName, char *file, char **argv, char **envp, int 
     int memFd = -1;
     char *buf = NULL;
 
-    // prepare data to send
-    // execve data
     const struct SpawnProcessOption option = {
         .envpSet = envpSet,
         .file = file,
+        .cwd = cwd,
         .argv = argv,
         .envp = envp,
     };
-    memFd = ON_ERR_GOTO(syscall(SYS_memfd_create, debugName, MFD_CLOEXEC), cleanup);
     const int bufSize = (int) SpawnProcessOption_bytesSize(&option);
-    ON_ERR_GOTO(ftruncate(memFd, bufSize), cleanup);
+
+    // prepare memfd, shared memory
+    memFd = ON_ERR_GOTO(syscall(SYS_memfd_create, debugName, MFD_CLOEXEC), cleanup);
     buf = mmap(NULL, bufSize, PROT_READ | PROT_WRITE, MAP_SHARED, memFd, 0);
     if (buf == MAP_FAILED) goto cleanup;
+    // fill the shared memory with execve data
     SpawnProcessOption_bytes(&option, buf);
-    // fds
+    munmap(buf, bufSize);
+    // prepare fd array
     int fds[REQ_FD_LEN] = {0};
     fds[REQ_CHILD_FD0_IDX] = stdinFd;
     fds[REQ_CHILD_FD1_IDX] = stdoutFd;
@@ -45,7 +95,7 @@ int sendSpawnRequest(char *debugName, char *file, char **argv, char **envp, int 
     fds[REQ_ERR_FD_IDX] = errFd;
     fds[REQ_MEM_FD_IDX] = memFd;
 
-    // send data
+    // Prepare unix socket message
     // control message buffer
     char cmsgBuf[REQ_CMSG_SIZE] = {0};
     // dummy buffer, UDS required must have at least 1 byte
@@ -67,15 +117,13 @@ int sendSpawnRequest(char *debugName, char *file, char **argv, char **envp, int 
     cmsghdr->cmsg_len = REQ_CMSG_SIZE;
     memcpy(CMSG_DATA(cmsghdr), fds, sizeof(fds));
     // send message
-    ON_ERR_GOTO(sendmsg(COMM_FD_UDS, &msg, 0), cleanup);
+    ON_ERR_GOTO(sendmsg(helperFd, &msg, 0), cleanup);
+    close(memFd);
     return 0;
 cleanup:;
     const int savedErrno = errno;
-    if (buf != NULL && buf != MAP_FAILED) {
-        munmap(buf, bufSize);
-    }
     if (memFd != -1) {
-        MUST_OK(close(memFd));
+        close(memFd);
     }
     errno = savedErrno;
     return -1;

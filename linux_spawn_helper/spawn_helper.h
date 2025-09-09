@@ -4,10 +4,18 @@
 #ifdef __cplusplus
 extern "C" {
 
+
+
 #endif
 
-int sendSpawnRequest(char *debugName, char *file, char **argv, char **envp, int envpSet, int errFd,
-                     int stdinFd, int stdoutFd, int stderrFd);
+int pipe2(int pipefd[2], int flags);
+
+int initHelper();
+
+int startHelper(int *udsFd, int *helperPid);
+
+int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, int envpSet, char *cwd,
+                     int errFd, int stdinFd, int stdoutFd, int stderrFd);
 
 #ifdef __cplusplus
 }

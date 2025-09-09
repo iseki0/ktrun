@@ -1,6 +1,5 @@
-headerFilter = fork_and_exec.h sched.h
-headers = fork_and_exec.h
-compilerOpts = -Isrc/linuxX64Main/nativeInterop/cinterop
-staticLibraries = fork_and_exec.a
-libraryPaths = src/linuxX64Main/nativeInterop/cinterop
-noStringConversion = do_fork_and_exec
+headerFilter = spawn_helper.h
+headers = spawn_helper.h
+compilerOpts = -Ilinux_spawn_helper
+staticLibraries = libspawn_helper_lib.a
+libraryPaths = linux_spawn_helper/build-x64

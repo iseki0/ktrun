@@ -7,29 +7,24 @@ import kotlinx.cinterop.CPointerVarOf
 import kotlinx.cinterop.CValuesRef
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
-import kotlinx.cinterop.alloc
-import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCValues
-import kotlinx.cinterop.toKStringFromUtf8
-import kotlinx.cinterop.value
-import platform.posix.EINTR
 import platform.posix.O_CLOEXEC
 import platform.posix.SIGKILL
-import platform.posix.close
+import platform.posix.STDERR_FILENO
+import platform.posix.STDIN_FILENO
+import platform.posix.STDOUT_FILENO
 import platform.posix.errno
 import platform.posix.open
-import platform.posix.poll
-import platform.posix.pollfd
-import platform.posix.syscall
-import space.iseki.ktrun.native.clone_args
-import space.iseki.ktrun.native.do_fork_and_exec
+import space.iseki.ktrun.native.initHelper
+import space.iseki.ktrun.native.sendSpawnRequest
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 @OptIn(ExperimentalForeignApi::class)
 internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
@@ -44,12 +39,9 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
             var stdinPipePair: OSPipe? = null
             var stdoutPipePair: OSPipe? = null
             var stderrPipePair: OSPipe? = null
-            var subStdinFd = 0
-            var subStdinFdSet = false
-            var subStdoutFd = 0
-            var subStdoutFdSet = false
-            var subStderrFd = 0
-            var subStderrFdSet = false
+            var subStdinFd = STDIN_FILENO
+            var subStdoutFd = STDOUT_FILENO
+            var subStderrFd = STDERR_FILENO
             val workingDirectory = pb.workingDirectory
             val workingDirectoryC = workingDirectory?.cstr?.getPointer(memScope)
             val execRPipe = OSPipe()
@@ -64,14 +56,12 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                 stdinPipe = when (val stdin = pb.stdin) {
                     ProcessIOHandler.INHERIT -> null
                     ProcessIOHandler.NULL -> {
-                        subStdinFdSet = true
                         subStdinFd = NUL_DEV
                         null
                     }
 
                     ProcessIOHandler.PIPE -> {
                         stdinPipePair = OSPipe()
-                        subStdinFdSet = true
                         subStdinFd = stdinPipePair.r.fd
                         LinuxWritable(stdinPipePair.w)
                     }
@@ -82,14 +72,12 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                 stdoutPipe = when (val stdout = pb.stdout) {
                     ProcessIOHandler.INHERIT -> null
                     ProcessIOHandler.NULL -> {
-                        subStdoutFdSet = true
                         subStdoutFd = NUL_DEV
                         null
                     }
 
                     ProcessIOHandler.PIPE -> {
                         stdoutPipePair = OSPipe()
-                        subStdoutFdSet = true
                         subStdoutFd = stdoutPipePair.w.fd
                         LinuxReadable(stdoutPipePair.r)
                     }
@@ -98,21 +86,18 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                 }
 
                 stderrPipe = if (pb.mergeStderrToStdout) {
-                    subStderrFdSet = true
                     subStderrFd = subStdoutFd
                     null
                 } else {
                     when (val stderr = pb.stderr) {
                         ProcessIOHandler.INHERIT -> null
                         ProcessIOHandler.NULL -> {
-                            subStderrFdSet = true
                             subStderrFd = NUL_DEV
                             null
                         }
 
                         ProcessIOHandler.PIPE -> {
                             stderrPipePair = OSPipe()
-                            subStderrFdSet = true
                             subStderrFd = stderrPipePair.w.fd
                             LinuxReadable(stderrPipePair.r)
                         }
@@ -122,11 +107,8 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                 }
                 val r = doForkAndExec(
                     subStdinFd = subStdinFd,
-                    subStdinFdSet = subStdinFdSet,
                     subStdoutFd = subStdoutFd,
-                    subStdoutFdSet = subStdoutFdSet,
                     subStderrFd = subStderrFd,
-                    subStderrFdSet = subStderrFdSet,
                     workingDirectoryC = workingDirectoryC,
                     pathC = pathC,
                     cmdlineC = cmdlineC,
@@ -162,30 +144,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
     }
 
     override fun waitForExit(dur: Duration): Int {
-        memScoped {
-            val pollfd = allocArray<pollfd>(1)
-            val fd = syscall(SYS_pidfd_open, this@ProcessImpl.pid, 0)
-            if (fd == -1L) failWithErrno("pidfd_open", errno)
-            try {
-                check(fd <= Int.MAX_VALUE) { "pidfd_open returned a file descriptor larger than Int.MAX_VALUE: $fd" }
-                pollfd[0].fd = fd.toInt()
-                waitHelper(dur) {
-                    val dur = it.inWholeMilliseconds
-                    val r = poll(pollfd, 1uL, dur.toInt())
-                    if (r < 0) {
-                        val errno = errno
-                        if (errno == EINTR) return@waitHelper false
-                        failWithErrno("pollfd", errno)
-                    }
-                    if (r == 0) return@waitHelper false
-                    TODO()
-                }
-                TODO()
-            } finally {
-                val r = close(fd.toInt())
-                if (r == -1) panicWithErrno("pidfd_open", errno)
-            }
-        }
+        TODO()
     }
 }
 
@@ -213,14 +172,11 @@ private class ForkAndExecResult(
     val pidfd: OsFd,
 )
 
-@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
+@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class, ExperimentalUuidApi::class)
 private fun doForkAndExec(
     subStdinFd: Int,
-    subStdinFdSet: Boolean,
     subStdoutFd: Int,
-    subStdoutFdSet: Boolean,
     subStderrFd: Int,
-    subStderrFdSet: Boolean,
     workingDirectoryC: CPointer<ByteVar>?,
     pathC: CPointer<ByteVar>,
     cmdlineC: CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>,
@@ -228,34 +184,23 @@ private fun doForkAndExec(
     execRPipe: Int,
 ): ForkAndExecResult {
     memScoped {
-        val ca = alloc<clone_args>()
-        val pidfd = alloc<IntVar>()
-        ca.pidfd = pidfd.ptr.reinterpret()
-        ca.flags = CLONE_PIDFD
-        val sPtr = alloc<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>()
-        val r = do_fork_and_exec(
-            sub_stdin_fd = subStdinFd,
-            use_sub_stdin = subStdinFdSet,
-            sub_stdout_fd = subStdoutFd,
-            use_sub_stdout = subStdoutFdSet,
-            sub_stderr_fd = subStderrFd,
-            use_sub_stderr = subStderrFdSet,
-            working_dir = workingDirectoryC,
-            path = pathC,
+        // TODO: helper leak
+        val helperFd = initHelper()
+        if (helperFd == -1) failWithErrno("initHelper", errno)
+        sendSpawnRequest(
+            helperFd = helperFd,
+            debugName = Uuid.random().toString().cstr,
+            file = pathC,
+            cwd = workingDirectoryC,
             argv = cmdlineC,
             envp = envC,
-            exec_error_pipe = execRPipe,
-            err_step = sPtr.ptr,
-            ca = ca.ptr,
+            envpSet = if (envC != null) 1 else 0,
+            errFd = execRPipe,
+            stdinFd = subStdinFd,
+            stdoutFd = subStdoutFd,
+            stderrFd = subStderrFd,
         )
-        val errnoValue = errno
-        val errStep = sPtr.value?.toKStringFromUtf8()
-        if (errStep != null) {
-            failWithErrno(errStep, errnoValue)
-        }
-        return ForkAndExecResult(pid =  r, pidfd = OsFd(pidfd.value))
+        TODO()
     }
 }
 
-private const val SYS_pidfd_open = 434L
-private const val CLONE_PIDFD = 0x00001000uL

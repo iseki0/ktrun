@@ -51,3 +51,18 @@ kotlin {
 //    }
 }
 
+val linuxX64NativePartCMake = tasks.register("linuxX64NativePartCMake", Exec::class.java) {
+    File("linux_spawn_helper/build-x64").mkdirs()
+    workingDir("linux_spawn_helper/build-x64")
+    commandLine("cmake", "--preset", "linux-musl", "..")
+}
+val linuxX64NativePartBuild = tasks.register("linuxX64NativePartBuild", Exec::class.java) {
+    dependsOn(linuxX64NativePartCMake)
+    workingDir("linux_spawn_helper/build-x64")
+    commandLine("ninja")
+}
+
+tasks.named("cinteropDoForkAndExecLinuxX64") {
+    dependsOn(linuxX64NativePartBuild)
+}
+

@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define COMM_FD_UDS 6
+#define COMM_FD_UDS 3939
 
 #define RES_MASK  (0x12345600)
 #define RES_COMPLETED  (RES_MASK | 2)
@@ -24,7 +24,9 @@ extern "C" {
 
 struct SpawnProcessOption {
     bool envpSet;
+    bool cwdSet;
     char *file;
+    char *cwd;
     char **argv;
     char **envp;
 };

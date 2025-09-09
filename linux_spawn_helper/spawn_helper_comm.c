@@ -45,6 +45,7 @@ struct SpawnProcessOptionPersistentHeader {
     size_t argvNumber;
     size_t envpNumber;
     bool envpSet;
+    bool cwdSet;
 };
 
 int SpawnProcessOption_parse(struct SpawnProcessOption *option, char *buf) {
@@ -52,11 +53,13 @@ int SpawnProcessOption_parse(struct SpawnProcessOption *option, char *buf) {
     REQUIRE_NULL(option->argv);
     REQUIRE_NULL(option->envp);
     REQUIRE_NULL(option->file);
+    REQUIRE_NULL(option->cwd);
     errno = 0;
     struct SpawnProcessOptionPersistentHeader header;
     memcpy(&header, buf, sizeof(header));
     buf += sizeof(header);
     CHECK_ERR(MBlock_GetCString(buf, &option->file, &buf));
+    CHECK_ERR(MBlock_GetCString(buf, &option->cwd, &buf));
     CHECK_ERR(doAllocStringArray(&option->argv, header.argvNumber));
     for (size_t i = 0; i < header.argvNumber; i++) {
         CHECK_ERR(MBlock_GetCString(buf, &option->argv[i], &buf));
@@ -66,12 +69,14 @@ int SpawnProcessOption_parse(struct SpawnProcessOption *option, char *buf) {
         CHECK_ERR(MBlock_GetCString(buf, &option->envp[i], &buf));
     }
     option->envpSet = header.envpSet;
+    option->cwdSet = header.cwdSet;
     return 0;
 err:;
     const int e = errno;
     doFreeStringArrayIfNotNull(&option->argv);
     doFreeStringArrayIfNotNull(&option->envp);
     doFreeStringIfNotNull(&option->file);
+    doFreeStringIfNotNull(&option->cwd);
     errno = e;
     return -1;
 }
@@ -81,11 +86,13 @@ void SpawnProcessOption_free(struct SpawnProcessOption *option) {
     doFreeStringArrayIfNotNull(&option->argv);
     doFreeStringArrayIfNotNull(&option->envp);
     doFreeStringIfNotNull(&option->file);
+    doFreeStringIfNotNull(&option->cwd);
 }
 
 size_t SpawnProcessOption_bytesSize(const struct SpawnProcessOption *option) {
     size_t size = sizeof(struct SpawnProcessOptionPersistentHeader);
     size += MBlock_SizeOfCString(option->file);
+    size += MBlock_SizeOfCString(option->cwd == NULL ? "" : option->cwd);
     for (size_t i = 0; option->argv != NULL && option->argv[i] != NULL; i++) {
         size += MBlock_SizeOfCString(option->argv[i]);
     }
@@ -109,10 +116,12 @@ void SpawnProcessOption_bytes(const struct SpawnProcessOption *option, char *buf
             header.envpNumber++;
         }
     }
+    header.cwdSet = option->cwdSet;
     header.envpSet = option->envpSet;
     memcpy(buf, &header, sizeof(header));
     buf += sizeof(header);
     MBlock_PutCString(buf, option->file, &buf);
+    MBlock_PutCString(buf, option->cwd == NULL ? "" : option->cwd, &buf);
     for (size_t i = 0; option->argv != NULL && option->argv[i] != NULL; i++) {
         MBlock_PutCString(buf, option->argv[i], &buf);
     }
