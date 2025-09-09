@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.31)
+cmake_minimum_required(VERSION 3.22)
 project(linux_spawn_helper)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
@@ -6,14 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
-
 add_executable(linux_spawn_helper
         main.c
-        spawn_helper.c
+        spawn_helper_comm.c
         util.c
         mblock.c
-        require_not_null.h
-        require_not_null.c)
+        require_not_null.c
+)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -30,15 +29,22 @@ enable_testing()
 
 add_executable(
         hello_test
-        spawn_helper.c
+        spawn_helper_comm.c
         util.c
         hello_test.cpp
-        mblock.h
         mblock.c
-        require_not_null.h
         require_not_null.c
         mblock_gtest.cc
-        spawn_process_gtest.cpp
+        spawn_process_comm_gtest.cpp
+)
+
+add_library(
+        spawn_helper_lib STATIC
+        spawn_helper.c
+        mblock.c
+        util.c
+        spawn_helper_comm.c
+        require_not_null.c
 )
 
 target_link_libraries(

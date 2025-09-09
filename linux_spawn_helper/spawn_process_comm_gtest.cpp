@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "spawn_helper.h"
+#include "spawn_helper_comm.h"
 
 TEST(SpawnProcessOptionTest, A) {
     SpawnProcessOption option = {};

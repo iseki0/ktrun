@@ -1,7 +1,3 @@
-//
-// Created by iseki on 2025/9/9.
-//
-
 #include "require_not_null.h"
 
 #include <stdlib.h>

@@ -1,13 +1,11 @@
-#include <assert.h>
+#define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
-#include <sched.h>
 #include <signal.h>
-#include<stdio.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <linux/memfd.h>
 #include <linux/sched.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -20,8 +18,9 @@
 
 
 #include "util.h"
+#include "spawn_helper_comm.h"
 
-#include "spawn_helper.h"
+
 
 // an eventfd, used to wakeup pidfd epoll thread, CLOEXEC
 int WAKEUP_FD;

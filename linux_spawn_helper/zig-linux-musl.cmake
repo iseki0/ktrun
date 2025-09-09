@@ -1,4 +1,4 @@
-  if (CMAKE_HOST_WIN32)
+if (CMAKE_HOST_WIN32)
     set(SCRIPT_SUFFIX ".cmd")
 else ()
     set(SCRIPT_SUFFIX ".sh")

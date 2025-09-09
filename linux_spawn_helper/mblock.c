@@ -1,14 +1,9 @@
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "require_not_null.h"
-
-
-#define REQUIRE_NOT_NULL(expr) if((expr) == NULL) { doPanic(#expr, " == NULL", __FILE__, __LINE__); _exit(1);}
-#define REQUIRE_NULL(expr) if((expr) != NULL) { doPanic(#expr, " != NULL", __FILE__, __LINE__); _exit(1);}
 
 size_t MBlock_SizeOfCString(const char *cstr) {
     REQUIRE_NOT_NULL(cstr);

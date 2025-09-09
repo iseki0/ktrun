@@ -1,9 +1,8 @@
-#ifndef _SPAWN_HELPER_UTIL_C
-#define _SPAWN_HELPER_UTIL_C 1
+#ifndef _SPAWN_HELPER_UTIL_H
+#define _SPAWN_HELPER_UTIL_H 1
 
 #include <fcntl.h>
 #include <sys/epoll.h>
-#include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -47,20 +46,6 @@
     for(const char *p = *arr; p!=NULL; p++) count++;  \
     count;                                          \
 })
-
-#define STRINGIFY(x) #x
-#define EXPAND_AND_STRINGIFY(x) STRINGIFY(x)
-
-#define PANIC_MESSAGE(cond_text) ("require: " cond_text " at " __FILE_NAME__  ":" EXPAND_AND_STRINGIFY(__LINE__) "\n")
-#define REQUIRE(cond) \
-    if(!(cond)) {\
-        const char * t = PANIC_MESSAGE(#cond);\
-        fullWrite(STDERR_FILENO,t, sizeof(PANIC_MESSAGE(#cond)));\
-        abort();\
-    }
-#define REQUIRE_NOT_NULL(p) REQUIRE((p) != NULL)
-#define REQUIRE_NULL(p) REQUIRE((p) == NULL)
-
 
 int clearCloexec(int fd);
 
