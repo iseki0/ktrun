@@ -11,7 +11,6 @@ import kotlinx.cinterop.alloc
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCValues
 import kotlinx.cinterop.value
@@ -34,7 +33,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
     override val stdoutPipe: Readable?
     override val stderrPipe: Readable?
     override val pid: Long
-    val pidfd: OsFd
+    val pidfd: OsResource
 
     init {
         memScoped {
@@ -140,9 +139,6 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
             if (it == 0) failWithErrno("open", errno)
         }
 
-        init {
-
-        }
     }
 
     override fun kill() {
@@ -155,7 +151,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
 }
 
 @OptIn(ExperimentalForeignApi::class)
-private fun throwSubprocessErrno(subProcessPipe: OsFd, exe: String, wd: String?) {
+private fun throwSubprocessErrno(subProcessPipe: OsResource, exe: String, wd: String?) {
     val buf = ByteArray(8)
     LinuxReadable(subProcessPipe).readNBytes(buf)
     memScoped {
@@ -175,7 +171,7 @@ private fun throwSubprocessErrno(subProcessPipe: OsFd, exe: String, wd: String?)
 
 private class ForkAndExecResult(
     val pid: Int,
-    val pidfd: OsFd,
+    val pidfd: OsResource,
 )
 
 @OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class, ExperimentalUuidApi::class)

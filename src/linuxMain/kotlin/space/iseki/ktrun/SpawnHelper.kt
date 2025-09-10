@@ -1,11 +1,8 @@
 package space.iseki.ktrun
 
-import kotlinx.atomicfu.locks.ReentrantLock
-import kotlinx.atomicfu.locks.withLock
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.useContents
-import platform.posix.close
 import platform.posix.errno
 import space.iseki.ktrun.native.initHelper
 import space.iseki.ktrun.native.startHelper
@@ -28,8 +25,7 @@ internal class SpawnHelper {
         }
     }
 
-    private val fdLock = ReentrantLock()
-    private var fd: Int = -1
+    private var fd: LinuxFd
 
     init {
         try {
@@ -37,7 +33,7 @@ internal class SpawnHelper {
                 startHelper().useContents {
                     if (childErrno != 0) failWithErrno("spawnHelper/children", childErrno)
                     if (commFd == -1) failWithErrno("spawnHelper", errno)
-                    this@SpawnHelper.fd = commFd
+                    this@SpawnHelper.fd = LinuxFd(commFd)
                 }
                 Worker.start().execute(
                     mode = TransferMode.SAFE,
@@ -52,17 +48,10 @@ internal class SpawnHelper {
 
     @OptIn(ExperimentalNativeApi::class)
     private fun loop() {
-        try {
+        fd.useResource { fd ->
             TODO()
-        } finally {
-            fdLock.withLock {
-                if (fd != -1) {
-                    if (close(fd) == -1) {
-                        terminateWithUnhandledException(translateErrnoNoThrow("close", errno))
-                    }
-                }
-            }
         }
     }
 
 }
+

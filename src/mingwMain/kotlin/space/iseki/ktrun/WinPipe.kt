@@ -64,13 +64,15 @@ internal class WinPipe {
                 memScoped {
                     val totalRead = alloc<UIntVar>()
                     buf.usePinned { pinned ->
-                        val r = ReadFile(
-                            hFile = read.handle,
-                            lpBuffer = pinned.addressOf(offset),
-                            nNumberOfBytesToRead = length.toUInt(),
-                            lpNumberOfBytesRead = totalRead.ptr,
-                            lpOverlapped = null,
-                        )
+                        val r = read.useResource { handle ->
+                            ReadFile(
+                                hFile = handle,
+                                lpBuffer = pinned.addressOf(offset),
+                                nNumberOfBytesToRead = length.toUInt(),
+                                lpNumberOfBytesRead = totalRead.ptr,
+                                lpOverlapped = null,
+                            )
+                        }
                         if (r != 0) {
                             return totalRead.value.toInt()
                         }
@@ -99,13 +101,15 @@ internal class WinPipe {
                 memScoped {
                     val totalWritten = alloc<UIntVar>()
                     buf.usePinned { pinned ->
-                        val r = WriteFile(
-                            hFile = write.handle,
-                            lpBuffer = pinned.addressOf(offset),
-                            nNumberOfBytesToWrite = length.toUInt(),
-                            lpNumberOfBytesWritten = totalWritten.ptr,
-                            lpOverlapped = null,
-                        )
+                        val r = write.useResource { handle ->
+                            WriteFile(
+                                hFile = handle,
+                                lpBuffer = pinned.addressOf(offset),
+                                nNumberOfBytesToWrite = length.toUInt(),
+                                lpNumberOfBytesWritten = totalWritten.ptr,
+                                lpOverlapped = null,
+                            )
+                        }
                         if (r != 0) {
                             return totalWritten.value.toInt().also { check(it == length) { "short written" } }
                         }
