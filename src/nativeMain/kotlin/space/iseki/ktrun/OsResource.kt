@@ -49,10 +49,13 @@ internal open class OsResource<T> : AutoCloseable {
         this.cleaner = createCleaner(holder, OsResourceInternalHolder<T>::close)
     }
 
+    protected val unsafeResource: T get() = holder.resource
 
     @OptIn(ExperimentalForeignApi::class)
     inline fun <R> useResource(f: (T) -> R): R {
-        usePinned { return f(holder.resource) }
+        return f(holder.resource)
+        // In theory, we should pin the resource here, but in practice, it seems unnecessary for most use cases.
+        // usePinned { return f(holder.resource) }
     }
 
     override fun close() {

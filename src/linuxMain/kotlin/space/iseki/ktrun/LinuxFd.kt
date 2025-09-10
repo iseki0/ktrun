@@ -8,6 +8,7 @@ private val f: (Int) -> Unit = {
 }
 
 internal class LinuxFd(fd: Int) : OsResource<Int>(fd, f) {
+    val unsafeFd: Int get() = unsafeResource
     fun closeAddSuppressed(th: Throwable?): Throwable? {
         try {
             close()

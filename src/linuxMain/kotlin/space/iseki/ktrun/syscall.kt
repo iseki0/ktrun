@@ -1,5 +1,8 @@
 package space.iseki.ktrun
 
+import kotlinx.cinterop.ByteVarOf
+import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.CPointerVarOf
 import kotlinx.cinterop.CValuesRef
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
@@ -30,4 +33,33 @@ internal fun pipe2(flag: Int): Pair<LinuxFd, LinuxFd> {
         if (res == -1) failWithErrno("pipe2", platform.posix.errno)
         return Pair(LinuxFd(fds[0]), LinuxFd(fds[1]))
     }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+internal fun sendSpawnRequest(
+    helperFd: LinuxFd,
+    debugName: CValuesRef<ByteVarOf<Byte>>?,
+    file: CValuesRef<ByteVarOf<Byte>>?,
+    argv: CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>?,
+    envp: CValuesRef<CPointerVarOf<CPointer<ByteVarOf<Byte>>>>?,
+    envpSet: Int,
+    cwd: CValuesRef<ByteVarOf<Byte>>?,
+    errFd: LinuxFd,
+    stdinFd: LinuxFd,
+    stdoutFd: LinuxFd,
+    stderrFd: LinuxFd,
+): Int {
+    return space.iseki.ktrun.native.sendSpawnRequest(
+        helperFd = helperFd.unsafeFd,
+        debugName = debugName,
+        file = file,
+        argv = argv,
+        envp = envp,
+        envpSet = envpSet,
+        cwd = cwd,
+        errFd = errFd.unsafeFd,
+        stdinFd = stdinFd.unsafeFd,
+        stdoutFd = stdoutFd.unsafeFd,
+        stderrFd = stderrFd.unsafeFd,
+    )
 }
