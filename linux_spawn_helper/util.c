@@ -81,3 +81,20 @@ void fullWriteOrExit(const int fd, const void *buf, const size_t count) {
     }
 }
 
+int readFull(const int fd, void *buf, const int count) {
+    int totalRead = 0;
+    while (totalRead < count) {
+        const int r = read(fd, (char *) buf + totalRead, count - totalRead);
+        if (r < 0) {
+            if (errno == EINTR) {
+                continue; // Interrupted, try again
+            }
+            return -1; // Error occurred
+        }
+        if (r == 0) {
+            break; // EOF reached
+        }
+        totalRead += r;
+    }
+    return totalRead; // Return total bytes read
+}

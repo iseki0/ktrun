@@ -78,5 +78,6 @@ ssize_t fullWrite(int fd, const void *buf, size_t count);
 
 void fullWriteOrExit(int fd, const void *buf, size_t count);
 
+int readFull(int fd, void *buf, int count);
 
 #endif

@@ -26,10 +26,10 @@ internal fun strerror(errno: Int): String {
     return platform.posix.strerror(errno)?.toKStringFromUtf8().orEmpty()
 }
 
-private fun tryTranslateErrno(call: String, errno: Int): Throwable? {
+internal fun tryTranslateErrno(call: String, errno: Int): Throwable? {
     return when (errno) {
-        ENOSYS -> UnsupportedOperationException("Unsupported syscall: $call")
-        ENOMEM -> OutOfMemoryError("Out of memory in $call")
+        ENOSYS -> UnsupportedOperationException("Unsupported operation $call")
+        ENOMEM -> OutOfMemoryError("Resource is not enough in $call")
         EIO -> IOException("I/O error in $call")
         else -> null
     }

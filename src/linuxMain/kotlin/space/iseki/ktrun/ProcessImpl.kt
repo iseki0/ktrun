@@ -22,9 +22,7 @@ import platform.posix.STDIN_FILENO
 import platform.posix.STDOUT_FILENO
 import platform.posix.errno
 import platform.posix.open
-import space.iseki.ktrun.native.initHelper
 import space.iseki.ktrun.native.sendSpawnRequest
-import space.iseki.ktrun.native.startHelper
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
 import kotlin.uuid.ExperimentalUuidApi
@@ -143,11 +141,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
         }
 
         init {
-            memScoped {
-                if (initHelper() == -1) {
-                    failWithErrno("initHelper", errno)
-                }
-            }
+
         }
     }
 
@@ -199,7 +193,6 @@ private fun doForkAndExec(
         // TODO: helper leak
         val helperPid = alloc<IntVar>()
         val helperFd = alloc<IntVar>()
-        if (startHelper(helperFd.ptr, helperPid.ptr) == -1) failWithErrno("startHelper", errno)
         if (helperFd.value == -1) failWithErrno("initHelper", errno)
         sendSpawnRequest(
             helperFd = helperFd.value,

@@ -74,22 +74,22 @@ void handleMessage(char *p, int childFd0, int childFd1, int childFd2, const int 
         CLOSE_UNUSED(childFd2);
         ON_ERR_GOTO_W(setCloexec(errFd), childErr);
 
-        // Reset all signal handlers to be ignored, mimicking the original code's logic.
-        // This prevents the child from inheriting unintended signal handlers.
-        struct sigaction sa = {0};
-        sa.sa_handler = SIG_IGN;
-        for (int i = 1; i < NSIG; i++) {
-            // SIGKILL and SIGSTOP cannot be caught or ignored; attempting to set
-            // a handler for them will fail. We skip them to be explicit.
-            if (i == SIGKILL || i == SIGSTOP) continue;
-            // ignore sigaction error, not only for SIGKILL and SIGSTOP.
-            // https://bugzilla.redhat.com/show_bug.cgi?id=53394
-            sigaction(i, &sa, NULL);
-        }
-
-        sigset_t empty = {0};
-        ON_ERR_GOTO_W(sigemptyset(&empty), childErr);
-        ON_ERR_GOTO_W(sigprocmask(SIG_SETMASK, &empty, NULL), childErr);
+        // // Reset all signal handlers to be ignored, mimicking the original code's logic.
+        // // This prevents the child from inheriting unintended signal handlers.
+        // struct sigaction sa = {0};
+        // sa.sa_handler = SIG_IGN;
+        // for (int i = 1; i < NSIG; i++) {
+        //     // SIGKILL and SIGSTOP cannot be caught or ignored; attempting to set
+        //     // a handler for them will fail. We skip them to be explicit.
+        //     if (i == SIGKILL || i == SIGSTOP) continue;
+        //     // ignore sigaction error, not only for SIGKILL and SIGSTOP.
+        //     // https://bugzilla.redhat.com/show_bug.cgi?id=53394
+        //     sigaction(i, &sa, NULL);
+        // }
+        //
+        // sigset_t empty = {0};
+        // ON_ERR_GOTO_W(sigemptyset(&empty), childErr);
+        // ON_ERR_GOTO_W(sigprocmask(SIG_SETMASK, &empty, NULL), childErr);
 
         if (option.envpSet) {
             ON_ERR_GOTO_W(execvpe(option.file, option.argv, option.envp), childErr);

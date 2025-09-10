@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE // NOLINT(*-reserved-identifier)
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
@@ -13,14 +14,15 @@
 #define MFD_CLOEXEC 0x0001U
 #define SYS_memfd_create			319
 
+#define CLOSE_FD_IF_NEED(expr) {if(expr > -1) {if(close(expr) == -1) {perror("close"); abort();}; expr = -1;}}
+
 extern const unsigned char _binary_linux_spawn_helper_bin_start[];
 extern const unsigned char _binary_linux_spawn_helper_bin_end[];
 
 int binaryMemFd = -1;
 
 int initHelper() {
-    size_t sz = (size_t) (_binary_linux_spawn_helper_bin_end
-                          - _binary_linux_spawn_helper_bin_start);
+    size_t sz = (size_t) (_binary_linux_spawn_helper_bin_end - _binary_linux_spawn_helper_bin_start);
     // load binary to memfd
     int memfd = -1;
     memfd = ON_ERR_GOTO(syscall(SYS_memfd_create, "spawn_helper", MFD_CLOEXEC), err);
@@ -42,35 +44,73 @@ err:;
     return -1;
 }
 
-int startHelper(int *udsFd, int *helperPid) {
+struct HelperStartResult startHelper() {
+    struct HelperStartResult result = {0};
     errno = 0;
-    int fds[2] = {0};
-    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, fds) == -1) {
-        return -1;
-    }
-    const int pid = fork();
-    if (pid == -1) {
-        const int e = errno;
-        close(fds[0]);
-        close(fds[1]);
-        errno = e;
-        return -1;
-    }
+
+    int errFd[2] = {-1, -1};
+    int sv[2] = {-1, -1};
+    ON_ERR_GOTO(pipe2(errFd, O_CLOEXEC), err);
+    ON_ERR_GOTO(socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, sv), err);
+
+    const int pid = ON_ERR_GOTO(fork(), err);
     if (pid == 0) {
         // children
-        if (dup2(fds[1], COMM_FD_UDS) == -1) {
-            _exit(1);
-        };
+        ON_ERR_GOTO(dup2(sv[1], COMM_FD_UDS), childErr);
+        // Reset all signal handlers to be ignored, mimicking the original code's logic.
+        // This prevents the child from inheriting unintended signal handlers.
+        struct sigaction sa = {0};
+        sa.sa_handler = SIG_IGN;
+        for (int i = 1; i < NSIG; i++) {
+            // SIGKILL and SIGSTOP cannot be caught or ignored; attempting to set a handler for them will fail.
+            // We skip them to be explicit.
+            if (i == SIGKILL || i == SIGSTOP) continue;
+            // ignore sigaction error, not only for SIGKILL and SIGSTOP.
+            // https://bugzilla.redhat.com/show_bug.cgi?id=53394
+            sigaction(i, &sa, NULL);
+        }
+        sigset_t empty = {0};
+        ON_ERR_GOTO(sigemptyset(&empty), childErr);
+        ON_ERR_GOTO(sigprocmask(SIG_SETMASK, &empty, NULL), childErr);
+        // exec
         char *argv[] = {"spawn_helper", NULL};
         extern char **environ;
-        if (fexecve(binaryMemFd, argv, environ) == -1) perror("fexecve failed");
+        fexecve(binaryMemFd, argv, environ);
+    childErr:;
+        const int e = errno;
+        fullWriteOrExit(errFd[1], &e, sizeof(e));
         _exit(1);
     }
     // parent
-    close(fds[1]);
-    *udsFd = fds[0];
-    *helperPid = pid;
-    return 0;
+    CLOSE_FD_IF_NEED(errFd[1]);
+    const int childErrnoLen = readFull(errFd[0], &result.childErrno, sizeof(result.childErrno));
+    if (childErrnoLen == -1) {
+        // read child errno failed
+        result.childErrno = 0;
+        goto err;
+    }
+    if (childErrnoLen != 0) {
+        if (childErrnoLen != sizeof(result.childErrno)) {
+            // read incompleted child errno
+            result.childErrno = EBADMSG;
+        }
+        goto err;
+    }
+
+    CLOSE_FD_IF_NEED(errFd[0]);
+    CLOSE_FD_IF_NEED(sv[1]);
+    result.commFd = sv[0];
+    return result;
+
+err:;
+    result.commFd = -1;
+    const int e = errno;
+    CLOSE_FD_IF_NEED(errFd[0]);
+    CLOSE_FD_IF_NEED(errFd[1]);
+    CLOSE_FD_IF_NEED(sv[0]);
+    CLOSE_FD_IF_NEED(sv[1]);
+    errno = e;
+    return result;
 }
 
 int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, int envpSet, char *cwd,
