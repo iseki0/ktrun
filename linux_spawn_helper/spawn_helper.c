@@ -13,22 +13,33 @@
 #define MFD_CLOEXEC 0x0001U
 #define SYS_memfd_create			319
 
-extern const char *const _binary_linux_spawn_helper_bin_start;
-extern const char *const _binary_linux_spawn_helper_bin_end;
-extern const int _binary_linux_spawn_helper_bin_size;
+extern const unsigned char _binary_linux_spawn_helper_bin_start[];
+extern const unsigned char _binary_linux_spawn_helper_bin_end[];
 
 int binaryMemFd = -1;
 
 int initHelper() {
+    size_t sz = (size_t) (_binary_linux_spawn_helper_bin_end
+                          - _binary_linux_spawn_helper_bin_start);
     // load binary to memfd
-    const int memfd = MUST_OK(syscall(SYS_memfd_create, "spawn_helper", MFD_CLOEXEC));
-    MUST_OK(ftruncate(memfd, _binary_linux_spawn_helper_bin_size));
-    const void *const p = MMAP_MUST_OK(mmap(NULL, _binary_linux_spawn_helper_bin_size, PROT_READ | PROT_WRITE,
-        MAP_SHARED, memfd, 0));
-    memcpy((void *) p, _binary_linux_spawn_helper_bin_start, _binary_linux_spawn_helper_bin_size);
-    MUST_OK(munmap((void *) p, _binary_linux_spawn_helper_bin_size));
+    int memfd = -1;
+    memfd = ON_ERR_GOTO(syscall(SYS_memfd_create, "spawn_helper", MFD_CLOEXEC), err);
+    ON_ERR_GOTO(ftruncate(memfd, sz), err);
+    const void *const p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+    if (p == MAP_FAILED) {
+        goto err;
+    }
+    memcpy((void *) p, _binary_linux_spawn_helper_bin_start, sz);
+    MUST_OK(munmap((void *) p, sz));
     binaryMemFd = memfd;
     return 0;
+err:;
+    const int e = errno;
+    if (memfd != -1) {
+        MUST_OK(close(memfd));
+    }
+    errno = e;
+    return -1;
 }
 
 int startHelper(int *udsFd, int *helperPid) {
@@ -81,7 +92,8 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     const int bufSize = (int) SpawnProcessOption_bytesSize(&option);
 
     // prepare memfd, shared memory
-    memFd = ON_ERR_GOTO(syscall(SYS_memfd_create, debugName, MFD_CLOEXEC), cleanup);
+    memFd = ON_ERR_GOTO_W(syscall(SYS_memfd_create, debugName, MFD_CLOEXEC), cleanup);
+    ON_ERR_GOTO_W(ftruncate(memFd, bufSize), cleanup);
     buf = mmap(NULL, bufSize, PROT_READ | PROT_WRITE, MAP_SHARED, memFd, 0);
     if (buf == MAP_FAILED) goto cleanup;
     // fill the shared memory with execve data
@@ -117,7 +129,7 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     cmsghdr->cmsg_len = REQ_CMSG_SIZE;
     memcpy(CMSG_DATA(cmsghdr), fds, sizeof(fds));
     // send message
-    ON_ERR_GOTO(sendmsg(helperFd, &msg, 0), cleanup);
+    ON_ERR_GOTO_W(sendmsg(helperFd, &msg, 0), cleanup);
     close(memFd);
     return 0;
 cleanup:;

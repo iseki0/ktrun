@@ -63,16 +63,16 @@ void handleMessage(char *p, int childFd0, int childFd1, int childFd2, const int 
     ca.flags = CLONE_PIDFD;
     ca.pidfd = (__u64) &pidfd;
 
-    const pid_t childPid = ON_ERR_GOTO(syscall(SYS_clone3, &ca, sizeof(ca)), err);
+    const pid_t childPid = ON_ERR_GOTO_W(syscall(SYS_clone3, &ca, sizeof(ca)), err);
     if (childPid == 0) {
         // -------------------------- Child Process --------------------------
-        ON_ERR_GOTO(dup2(childFd0, STDIN_FILENO), childErr);
+        ON_ERR_GOTO_W(dup2(childFd0, STDIN_FILENO), childErr);
         CLOSE_UNUSED(childFd0);
-        ON_ERR_GOTO(dup2(childFd1, STDOUT_FILENO), childErr);
+        ON_ERR_GOTO_W(dup2(childFd1, STDOUT_FILENO), childErr);
         CLOSE_UNUSED(childFd1);
-        ON_ERR_GOTO(dup2(childFd2, STDERR_FILENO), childErr);
+        ON_ERR_GOTO_W(dup2(childFd2, STDERR_FILENO), childErr);
         CLOSE_UNUSED(childFd2);
-        ON_ERR_GOTO(setCloexec(errFd), childErr);
+        ON_ERR_GOTO_W(setCloexec(errFd), childErr);
 
         // Reset all signal handlers to be ignored, mimicking the original code's logic.
         // This prevents the child from inheriting unintended signal handlers.
@@ -88,13 +88,13 @@ void handleMessage(char *p, int childFd0, int childFd1, int childFd2, const int 
         }
 
         sigset_t empty = {0};
-        ON_ERR_GOTO(sigemptyset(&empty), childErr);
-        ON_ERR_GOTO(sigprocmask(SIG_SETMASK, &empty, NULL), childErr);
+        ON_ERR_GOTO_W(sigemptyset(&empty), childErr);
+        ON_ERR_GOTO_W(sigprocmask(SIG_SETMASK, &empty, NULL), childErr);
 
         if (option.envpSet) {
-            ON_ERR_GOTO(execvpe(option.file, option.argv, option.envp), childErr);
+            ON_ERR_GOTO_W(execvpe(option.file, option.argv, option.envp), childErr);
         } else {
-            ON_ERR_GOTO(execvp(option.file, option.argv), childErr);
+            ON_ERR_GOTO_W(execvp(option.file, option.argv), childErr);
         }
         // Should not reach here
         errWhere = "unreachable";
@@ -110,7 +110,8 @@ void handleMessage(char *p, int childFd0, int childFd1, int childFd2, const int 
     // Add pidfd to epoll
     MUST_OK(addToEpoll(EPOLL_FD, pidfd, childPid, EPOLLIN | EPOLLHUP | EPOLLERR));
     // Wakeup
-    MUST_OK(write(WAKEUP_FD, "", 1));
+    const int64_t dummy = 1;
+    MUST_OK(write(WAKEUP_FD, &dummy, sizeof(dummy)));
     errno = 0;
 err:;
     const int savedErrno = errno;
@@ -218,8 +219,8 @@ int main() {
             const struct epoll_event ev = events[i];
             const int fd = EPOLL_DATA_FD(ev);
             if (fd == WAKEUP_FD) {
-                char v = 0;
-                MUST_OK(read(WAKEUP_FD, &v, sizeof(v)));
+                int64_t dummy = 0;
+                MUST_OK(read(WAKEUP_FD, &dummy, sizeof(dummy)));
                 continue;
             }
             if (fd == COMM_FD_UDS) {
@@ -236,7 +237,7 @@ int main() {
                 fprintf(stderr, "pidfd error, pid: %d\n", pid);
                 _exit(1);
             }
-            if (ev.events & EPOLLHUP) {
+            if (ev.events & EPOLLIN) {
                 errno = 0;
                 int wstatus = 0;
                 waitpid(EPOLL_DATA_PID(ev), &wstatus, WNOHANG);
@@ -264,7 +265,10 @@ int main() {
                 // clean up
                 MUST_OK(epoll_ctl(EPOLL_FD, EPOLL_CTL_DEL, fd, NULL));
                 free(ev.data.ptr);
+                continue;
             }
+            fprintf(stderr, "Unknown event in epoll, fd: %d\n", fd);
+            _exit(1);
         }
     }
 }

@@ -7,11 +7,14 @@ import kotlinx.cinterop.CPointerVarOf
 import kotlinx.cinterop.CValuesRef
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
+import kotlinx.cinterop.alloc
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCValues
+import kotlinx.cinterop.value
 import platform.posix.O_CLOEXEC
 import platform.posix.SIGKILL
 import platform.posix.STDERR_FILENO
@@ -21,6 +24,7 @@ import platform.posix.errno
 import platform.posix.open
 import space.iseki.ktrun.native.initHelper
 import space.iseki.ktrun.native.sendSpawnRequest
+import space.iseki.ktrun.native.startHelper
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
 import kotlin.uuid.ExperimentalUuidApi
@@ -132,11 +136,19 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
         }
     }
 
+    @OptIn(ExperimentalNativeApi::class)
     companion object {
         private val NUL_DEV: Int = open("/dev/null", O_CLOEXEC).also {
             if (it == 0) failWithErrno("open", errno)
         }
 
+        init {
+            memScoped {
+                if (initHelper() == -1) {
+                    failWithErrno("initHelper", errno)
+                }
+            }
+        }
     }
 
     override fun kill() {
@@ -185,10 +197,12 @@ private fun doForkAndExec(
 ): ForkAndExecResult {
     memScoped {
         // TODO: helper leak
-        val helperFd = initHelper()
-        if (helperFd == -1) failWithErrno("initHelper", errno)
+        val helperPid = alloc<IntVar>()
+        val helperFd = alloc<IntVar>()
+        if (startHelper(helperFd.ptr, helperPid.ptr) == -1) failWithErrno("startHelper", errno)
+        if (helperFd.value == -1) failWithErrno("initHelper", errno)
         sendSpawnRequest(
-            helperFd = helperFd,
+            helperFd = helperFd.value,
             debugName = Uuid.random().toString().cstr,
             file = pathC,
             cwd = workingDirectoryC,

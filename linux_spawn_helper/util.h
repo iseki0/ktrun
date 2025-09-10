@@ -29,11 +29,20 @@
 
 #define SWAP(a, b) { __typeof__(a) __tmp = (a); (a) = (b); (b) = __tmp;}
 
-#define ON_ERR_GOTO(expr, target)       \
+#define ON_ERR_GOTO_W(expr, target)       \
 ({                                      \
     __typeof__(expr) __val = (expr);    \
     if (__val == -1) {                  \
         errWhere = #expr;               \
+        goto target;                    \
+    }                                   \
+    __val;                              \
+})
+
+#define ON_ERR_GOTO(expr, target)       \
+({                                      \
+    __typeof__(expr) __val = (expr);    \
+    if (__val == -1) {                  \
         goto target;                    \
     }                                   \
     __val;                              \
