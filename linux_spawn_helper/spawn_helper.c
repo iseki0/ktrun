@@ -113,17 +113,20 @@ err:;
     return result;
 }
 
-int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, int envpSet, char *cwd,
-                     int errFd, int stdinFd, int stdoutFd, int stderrFd) {
+int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, char *cwd, int stdinFd,
+                     int stdoutFd, int stderrFd) {
     REQUIRE_NOT_NULL(file);
     REQUIRE_NOT_NULL(argv);
     errno = 0;
-    const char *errWhere = NULL;
     int memFd = -1;
     char *buf = NULL;
+    int childErrFd[2] = {-1, -1};
+    int cloneMsgFd[2] = {-1, -1};
+
+    ON_ERR_GOTO(pipe2(childErrFd, O_CLOEXEC), cleanup);
+    ON_ERR_GOTO(pipe2(cloneMsgFd, O_CLOEXEC), cleanup);
 
     const struct SpawnProcessOption option = {
-        .envpSet = envpSet,
         .file = file,
         .cwd = cwd,
         .argv = argv,
@@ -132,20 +135,22 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     const int bufSize = (int) SpawnProcessOption_bytesSize(&option);
 
     // prepare memfd, shared memory
-    memFd = ON_ERR_GOTO_W(syscall(SYS_memfd_create, debugName, MFD_CLOEXEC), cleanup);
-    ON_ERR_GOTO_W(ftruncate(memFd, bufSize), cleanup);
+    memFd = ON_ERR_GOTO(syscall(SYS_memfd_create, debugName, MFD_CLOEXEC), cleanup);
+    ON_ERR_GOTO(ftruncate(memFd, bufSize), cleanup);
     buf = mmap(NULL, bufSize, PROT_READ | PROT_WRITE, MAP_SHARED, memFd, 0);
     if (buf == MAP_FAILED) goto cleanup;
     // fill the shared memory with execve data
     SpawnProcessOption_bytes(&option, buf);
-    munmap(buf, bufSize);
+    MUST_OK(munmap(buf, bufSize));
+    buf = NULL;
     // prepare fd array
     int fds[REQ_FD_LEN] = {0};
     fds[REQ_CHILD_FD0_IDX] = stdinFd;
     fds[REQ_CHILD_FD1_IDX] = stdoutFd;
     fds[REQ_CHILD_FD2_IDX] = stderrFd;
-    fds[REQ_ERR_FD_IDX] = errFd;
     fds[REQ_MEM_FD_IDX] = memFd;
+    fds[REQ_CHILD_ERR_IDX] = childErrFd[1];
+    fds[REQ_CLONE_MSG_IDX] = cloneMsgFd[1];
 
     // Prepare unix socket message
     // control message buffer
@@ -169,14 +174,44 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     cmsghdr->cmsg_len = REQ_CMSG_SIZE;
     memcpy(CMSG_DATA(cmsghdr), fds, sizeof(fds));
     // send message
-    ON_ERR_GOTO_W(sendmsg(helperFd, &msg, 0), cleanup);
-    close(memFd);
-    return 0;
-cleanup:;
-    const int savedErrno = errno;
-    if (memFd != -1) {
-        close(memFd);
+    ON_ERR_GOTO(sendmsg(helperFd, &msg, 0), cleanup);
+    // close unneeded fds
+    CLOSE_FD_IF_NEED(memFd);
+    CLOSE_FD_IF_NEED(childErrFd[1]);
+    CLOSE_FD_IF_NEED(cloneMsgFd[1]);
+    // handle clone result and error
+    struct ProcessCloneResult cloneResult = {0};
+    if (ON_ERR_GOTO(readFull(cloneMsgFd[0], &cloneResult, sizeof(cloneResult)), cleanup) != sizeof(cloneResult)) {
+        cloneResult._errno = EBADMSG;
     }
+    if (cloneResult._errno != 0) {
+        errno = cloneResult._errno;
+        goto cleanup;
+    }
+    // handle child error
+    int childErrno = 0;
+    const int childErrnoLen = ON_ERR_GOTO(readFull(childErrFd[0], &childErrno, sizeof(childErrno)), cleanup);
+    if (childErrnoLen != sizeof(childErrno) && childErrnoLen != 0) {
+        childErrno = EBADMSG;
+    }
+    if (childErrno != 0) {
+        errno = childErrno;
+        goto cleanup;
+    }
+    return cloneResult.pid;
+cleanup:;
+    int savedErrno = errno;
+    CLOSE_FD_IF_NEED(memFd);
+    if (buf != NULL) {
+        if (munmap(buf, bufSize) == -1) {
+            perror("munmap");
+            abort();
+        }
+    }
+    CLOSE_FD_IF_NEED(childErrFd[0]);
+    CLOSE_FD_IF_NEED(childErrFd[1]);
+    CLOSE_FD_IF_NEED(cloneMsgFd[0]);
+    CLOSE_FD_IF_NEED(cloneMsgFd[1]);
     errno = savedErrno;
     return -1;
 }

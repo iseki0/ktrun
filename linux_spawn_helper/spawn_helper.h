@@ -20,9 +20,8 @@ struct HelperStartResult {
 
 struct HelperStartResult startHelper();
 
-int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp,
-                     int envpSet, char *cwd,
-                     int errFd, int stdinFd, int stdoutFd, int stderrFd);
+int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, char *cwd, int stdinFd,
+                     int stdoutFd, int stderrFd);
 
 
 #ifdef __cplusplus

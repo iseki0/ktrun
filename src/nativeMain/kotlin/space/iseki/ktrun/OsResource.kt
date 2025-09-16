@@ -2,7 +2,6 @@ package space.iseki.ktrun
 
 import kotlinx.atomicfu.atomic
 import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.usePinned
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.native.ref.Cleaner
 import kotlin.native.ref.createCleaner
@@ -24,6 +23,7 @@ internal class OsResourceInternalHolder<T>(
 
     private var closed = atomic(false)
     override fun close() {
+
         if (closed.compareAndSet(expect = false, update = true)) {
             try {
                 closeFn(resource)

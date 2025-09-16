@@ -10,7 +10,7 @@ import platform.posix.EINTR
 import platform.posix.errno
 
 @OptIn(ExperimentalForeignApi::class)
-internal class LinuxReadable(val fd: LinuxFd) : Readable {
+internal class LinuxReadable(private val fd: LinuxFd) : Readable {
     private val mutex = ReentrantLock()
     private var closed = false
     override fun close() {

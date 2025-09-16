@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 
 
@@ -58,18 +59,24 @@ int SpawnProcessOption_parse(struct SpawnProcessOption *option, char *buf) {
     struct SpawnProcessOptionPersistentHeader header;
     memcpy(&header, buf, sizeof(header));
     buf += sizeof(header);
+    // file
     CHECK_ERR(MBlock_GetCString(buf, &option->file, &buf));
-    CHECK_ERR(MBlock_GetCString(buf, &option->cwd, &buf));
+    // cwd
+    if (header.cwdSet) {
+        CHECK_ERR(MBlock_GetCString(buf, &option->cwd, &buf));
+    }
+    // argv
     CHECK_ERR(doAllocStringArray(&option->argv, header.argvNumber));
     for (size_t i = 0; i < header.argvNumber; i++) {
         CHECK_ERR(MBlock_GetCString(buf, &option->argv[i], &buf));
     }
-    CHECK_ERR(doAllocStringArray(&option->envp, header.envpNumber));
-    for (size_t i = 0; i < header.envpNumber; i++) {
-        CHECK_ERR(MBlock_GetCString(buf, &option->envp[i], &buf));
+    // envp
+    if (header.envpSet) {
+        CHECK_ERR(doAllocStringArray(&option->envp, header.envpNumber))
+        for (size_t i = 0; i < header.envpNumber; i++) {
+            CHECK_ERR(MBlock_GetCString(buf, &option->envp[i], &buf));
+        }
     }
-    option->envpSet = header.envpSet;
-    option->cwdSet = header.cwdSet;
     return 0;
 err:;
     const int e = errno;
@@ -90,42 +97,65 @@ void SpawnProcessOption_free(struct SpawnProcessOption *option) {
 }
 
 size_t SpawnProcessOption_bytesSize(const struct SpawnProcessOption *option) {
+    REQUIRE_NOT_NULL(option);
+    REQUIRE_NOT_NULL(option->argv);
+    REQUIRE_NOT_NULL(option->file);
     size_t size = sizeof(struct SpawnProcessOptionPersistentHeader);
+    // file
     size += MBlock_SizeOfCString(option->file);
-    size += MBlock_SizeOfCString(option->cwd == NULL ? "" : option->cwd);
-    for (size_t i = 0; option->argv != NULL && option->argv[i] != NULL; i++) {
+    // cwd
+    if (option->cwd != NULL) {
+        size += MBlock_SizeOfCString(option->cwd);
+    }
+    // argv
+    for (size_t i = 0; option->argv[i] != NULL; i++) {
         size += MBlock_SizeOfCString(option->argv[i]);
     }
-    for (size_t i = 0; option->envp != NULL && option->envp[i] != NULL; i++) {
-        size += MBlock_SizeOfCString(option->envp[i]);
+    // envp
+    if (option->envp) {
+        for (size_t i = 0; option->envp[i] != NULL; i++) {
+            size += MBlock_SizeOfCString(option->envp[i]);
+        }
     }
     return size;
 }
 
 void SpawnProcessOption_bytes(const struct SpawnProcessOption *option, char *buf) {
-    struct SpawnProcessOptionPersistentHeader header;
+    REQUIRE_NOT_NULL(option);
+    REQUIRE_NOT_NULL(option->argv);
+    REQUIRE_NOT_NULL(option->file);
+    struct SpawnProcessOptionPersistentHeader header = {
+        .envpSet = option->envp != NULL,
+        .cwdSet = option->cwd != NULL,
+    };
+    // set numbers - argv
     header.argvNumber = 0;
-    if (option->argv != NULL) {
-        for (size_t i = 0; option->argv[i] != NULL; i++) {
-            header.argvNumber++;
-        }
+    for (size_t i = 0; option->argv[i] != NULL; i++) {
+        header.argvNumber++;
     }
+    // set numbers - envp
     header.envpNumber = 0;
     if (option->envp != NULL) {
         for (size_t i = 0; option->envp[i] != NULL; i++) {
             header.envpNumber++;
         }
     }
-    header.cwdSet = option->cwdSet;
-    header.envpSet = option->envpSet;
     memcpy(buf, &header, sizeof(header));
     buf += sizeof(header);
+    // file
     MBlock_PutCString(buf, option->file, &buf);
-    MBlock_PutCString(buf, option->cwd == NULL ? "" : option->cwd, &buf);
-    for (size_t i = 0; option->argv != NULL && option->argv[i] != NULL; i++) {
+    // cwd
+    if (option->cwd != NULL) {
+        MBlock_PutCString(buf, option->cwd, &buf);
+    }
+    // argv
+    for (size_t i = 0; option->argv[i] != NULL; i++) {
         MBlock_PutCString(buf, option->argv[i], &buf);
     }
-    for (size_t i = 0; option->envp != NULL && option->envp[i] != NULL; i++) {
-        MBlock_PutCString(buf, option->envp[i], &buf);
+    // envp
+    if (option->envp != NULL) {
+        for (size_t i = 0; option->envp[i] != NULL; i++) {
+            MBlock_PutCString(buf, option->envp[i], &buf);
+        }
     }
 }

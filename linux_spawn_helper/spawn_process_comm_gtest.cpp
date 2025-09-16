@@ -5,9 +5,8 @@
 TEST(SpawnProcessOptionTest, A) {
     SpawnProcessOption option = {};
     option.file = "foo";
-    option.envpSet = false;
-    option.argv = (char *[]){"arg1", "arg2", NULL};
-    option.envp = (char *[]){NULL};
+    option.argv = (char *[]){"arg1", "arg2", nullptr};
+    option.envp = nullptr;
     const size_t size = SpawnProcessOption_bytesSize(&option);
     std::cout << "SpawnProcessOption_bytesSize: " << size << std::endl;
     void *buf = malloc(size + 64);
@@ -21,7 +20,7 @@ TEST(SpawnProcessOptionTest, A) {
     std::cout << "parsed" << std::endl;
     std::cout << "option2.file: " << option2.file << std::endl;
     EXPECT_STREQ(option.file, option2.file);
-    EXPECT_EQ(option.envpSet, option2.envpSet);
+    EXPECT_EQ(option.envp, option2.envp);
     free(buf);
     free(buf2);
 }

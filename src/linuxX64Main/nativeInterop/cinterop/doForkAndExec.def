@@ -1,5 +1,5 @@
-headerFilter = spawn_helper.h
-headers = spawn_helper.h
+headerFilter = spawn_helper.h spawn_helper_comm.h
+headers = spawn_helper.h spawn_helper_comm.h
 compilerOpts = -Ilinux_spawn_helper
 libraryPaths = linux_spawn_helper/build-x64
 staticLibraries = libspawn_helper_lib.a

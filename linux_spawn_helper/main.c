@@ -21,7 +21,6 @@
 #include "spawn_helper_comm.h"
 
 
-
 // an eventfd, used to wakeup pidfd epoll thread, CLOEXEC
 int WAKEUP_FD;
 
@@ -30,40 +29,23 @@ int EPOLL_FD;
 
 #define CLOSE_UNUSED(fd)  if(fd > 2) { MUST_OK(close(fd)); fd = 0; }
 
-void sendCompletedMessage(const int errNo, const long pid, const char *const errWhere) {
-    struct ResMeg res = {
-        .kind = RES_COMPLETED,
-        .completed = {
-            .errNo = errNo,
-            .pid = pid,
-        },
-    };
-    if (errWhere != NULL) {
-        strncpy(res.completed.errWhere, errWhere, sizeof(res.completed.errWhere) - 1);
-    }
-    struct msghdr msg = {0};
-    struct iovec iov = {0};
-    iov.iov_base = &res;
-    iov.iov_len = sizeof(res);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    MUST_OK(sendmsg(COMM_FD_UDS, &msg, 0));
-}
 
-void handleMessage(char *p, int childFd0, int childFd1, int childFd2, const int errFd) {
+void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int errFd, int cloneMsgFd) {
     struct SpawnProcessOption option = {0};
     int pidfd = 0;
-
-    MUST_OK(SpawnProcessOption_parse(&option, p));
-
     const char *errWhere = NULL;
+    pid_t childPid = -1;
+
+    ON_ERR_GOTO_W(SpawnProcessOption_parse(&option, p), cleanup);
+    ON_ERR_GOTO_W(setCloexec(errFd), cleanup);
+    ON_ERR_GOTO_W(setCloexec(cloneMsgFd), cleanup);
 
     // prepare clone
     struct clone_args ca = {0};
     ca.flags = CLONE_PIDFD;
     ca.pidfd = (__u64) &pidfd;
 
-    const pid_t childPid = ON_ERR_GOTO_W(syscall(SYS_clone3, &ca, sizeof(ca)), err);
+    childPid = ON_ERR_GOTO_W(syscall(SYS_clone3, &ca, sizeof(ca)), cleanup);
     if (childPid == 0) {
         // -------------------------- Child Process --------------------------
         ON_ERR_GOTO_W(dup2(childFd0, STDIN_FILENO), childErr);
@@ -72,26 +54,7 @@ void handleMessage(char *p, int childFd0, int childFd1, int childFd2, const int 
         CLOSE_UNUSED(childFd1);
         ON_ERR_GOTO_W(dup2(childFd2, STDERR_FILENO), childErr);
         CLOSE_UNUSED(childFd2);
-        ON_ERR_GOTO_W(setCloexec(errFd), childErr);
-
-        // // Reset all signal handlers to be ignored, mimicking the original code's logic.
-        // // This prevents the child from inheriting unintended signal handlers.
-        // struct sigaction sa = {0};
-        // sa.sa_handler = SIG_IGN;
-        // for (int i = 1; i < NSIG; i++) {
-        //     // SIGKILL and SIGSTOP cannot be caught or ignored; attempting to set
-        //     // a handler for them will fail. We skip them to be explicit.
-        //     if (i == SIGKILL || i == SIGSTOP) continue;
-        //     // ignore sigaction error, not only for SIGKILL and SIGSTOP.
-        //     // https://bugzilla.redhat.com/show_bug.cgi?id=53394
-        //     sigaction(i, &sa, NULL);
-        // }
-        //
-        // sigset_t empty = {0};
-        // ON_ERR_GOTO_W(sigemptyset(&empty), childErr);
-        // ON_ERR_GOTO_W(sigprocmask(SIG_SETMASK, &empty, NULL), childErr);
-
-        if (option.envpSet) {
+        if (option.envp != NULL) {
             ON_ERR_GOTO_W(execvpe(option.file, option.argv, option.envp), childErr);
         } else {
             ON_ERR_GOTO_W(execvp(option.file, option.argv), childErr);
@@ -108,17 +71,20 @@ void handleMessage(char *p, int childFd0, int childFd1, int childFd2, const int 
     }
 
     // Add pidfd to epoll
-    MUST_OK(addToEpoll(EPOLL_FD, pidfd, childPid, EPOLLIN | EPOLLHUP | EPOLLERR));
+    ON_ERR_GOTO_W(addToEpoll(EPOLL_FD, pidfd, childPid, EPOLLIN | EPOLLHUP | EPOLLERR), cleanup);
     // Wakeup
     const int64_t dummy = 1;
-    MUST_OK(write(WAKEUP_FD, &dummy, sizeof(dummy)));
+    ON_ERR_GOTO_W(write(WAKEUP_FD, &dummy, sizeof(dummy)), cleanup);
     errno = 0;
-err:;
-    const int savedErrno = errno;
-    // cleanup
-    if (savedErrno != 0)
+    errWhere = NULL;
+cleanup:;
+    const struct ProcessCloneResult res = {
+        .pid = childPid,
+        ._errno = errno,
+    };
+    fullWriteOrExit(cloneMsgFd, &res, sizeof(res));
+    if (res._errno != 0)
         CLOSE_UNUSED(pidfd);
-    sendCompletedMessage(savedErrno, childPid, errWhere);
 }
 
 void recvMessage() {
@@ -150,7 +116,7 @@ void recvMessage() {
         exit(1);
     }
     if (cmsghdr->cmsg_len != REQ_CMSG_SIZE) {
-        fprintf(stderr, "Invalid control message length: %d\n", cmsghdr->cmsg_len);
+        fprintf(stderr, "Invalid control message length: %lu\n", cmsghdr->cmsg_len);
         exit(1);
     }
     // fd receiving
@@ -163,7 +129,8 @@ void recvMessage() {
         }
     }
     const int memFd = fds[REQ_MEM_FD_IDX];
-    const int errFd = fds[REQ_ERR_FD_IDX];
+    const int errFd = fds[REQ_CHILD_ERR_IDX];
+    const int cloneMsgFd = fds[REQ_CLONE_MSG_IDX];
     const int childFd0 = fds[REQ_CHILD_FD0_IDX];
     const int childFd1 = fds[REQ_CHILD_FD1_IDX];
     const int childFd2 = fds[REQ_CHILD_FD2_IDX];
@@ -173,7 +140,7 @@ void recvMessage() {
     // mmap
     void *p = MMAP_MUST_OK(mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, memFd, 0));
     // handle message
-    handleMessage(p, childFd0, childFd1, childFd2, errFd);
+    handleMessage(p, childFd0, childFd1, childFd2, errFd, cloneMsgFd);
     // clean up
     MUST_OK(munmap(p, st.st_size));
     MUST_OK(close(memFd));
@@ -181,6 +148,7 @@ void recvMessage() {
     MUST_OK(close(childFd0));
     MUST_OK(close(childFd1));
     MUST_OK(close(childFd2));
+    MUST_OK(close(cloneMsgFd));
 }
 
 
@@ -248,12 +216,9 @@ int main() {
                     perror("waitpid");
                     _exit(1);
                 }
-                struct ResMeg res = {
-                    .kind = RES_EXITED,
-                    .exited = {
-                        .pid = EPOLL_DATA_PID(ev),
-                        .exitCode = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : -1,
-                    },
+                struct ProcessExitMsg res = {
+                    .pid = EPOLL_DATA_PID(ev),
+                    .exitCode = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : -1,
                 };
                 struct msghdr msg = {0};
                 struct iovec iov = {0};
