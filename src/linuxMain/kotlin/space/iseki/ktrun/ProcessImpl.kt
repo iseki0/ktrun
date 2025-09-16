@@ -159,7 +159,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
 
     override fun waitForExit(dur: Duration): Int? {
         return try {
-            waitFuture.get(dur)
+            if (dur.isInfinite()) waitFuture.get() else waitFuture.get(dur)
         } catch (_: CFuture.TimeoutException) {
             null
         }

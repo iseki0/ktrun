@@ -168,7 +168,6 @@ internal class CFuture<T> {
                 result = value
                 error = failure
                 if (!isSet) {
-                    println("do waitFn, $isSet=$isSet, value=$value, failure=$failure")
                     waitFn()
                     continue
                 }
@@ -185,8 +184,9 @@ internal class CFuture<T> {
 
     fun get(): T {
         return get0 {
-            if (pthread_cond_wait(holder.cond.ptr, holder.mutex.ptr) != 0) {
-                fatal("pthread_cond_wait")
+            when (val e = pthread_cond_wait(holder.cond.ptr, holder.mutex.ptr)) {
+                0 -> {}
+                else -> fatal("pthread_cond_timedwait", e)
             }
         }
     }
@@ -204,11 +204,10 @@ internal class CFuture<T> {
                 ts.tv_nsec -= 1_000_000_000
             }
             return get0 {
-                if (pthread_cond_timedwait(holder.cond.ptr, holder.mutex.ptr, ts.ptr) != 0) {
-                    when (val errno = errno) {
-                        ETIMEDOUT -> throw TimeoutException()
-                        else -> fatal("pthread_cond_timedwait", errno)
-                    }
+                when (val e = pthread_cond_timedwait(holder.cond.ptr, holder.mutex.ptr, ts.ptr)) {
+                    0 -> {}
+                    ETIMEDOUT -> throw TimeoutException()
+                    else -> fatal("pthread_cond_timedwait", e)
                 }
             }
         }

@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.time.Duration.Companion.seconds
 
 class HelloTest {
     @Test
@@ -14,6 +15,7 @@ class HelloTest {
             stderr = inherit()
         }
         println(process.pid)
+        assertEquals(0, process.waitForExit())
     }
 
     @Test
@@ -24,12 +26,13 @@ class HelloTest {
             stderr = inherit()
         }
         println(process.pid)
+        assertEquals(1, process.waitForExit())
     }
 
     @Test
     fun execveNotFound(){
         assertFailsWith<NoSuchFileException> {
-            val process = buildProcess {
+            buildProcess {
                 cmdline = listOf("/program_not_exist")
                 stdout = inherit()
                 stderr = inherit()
@@ -66,6 +69,7 @@ class HelloTest {
         val n = process.stdoutPipe!!.readNBytes(buf)
         val output = buf.decodeToString(0, n)
         assertEquals("Hello, Linux!\n", output)
+        assertEquals(0, process.waitForExit(1.seconds))
     }
 
     @Test
@@ -84,5 +88,6 @@ class HelloTest {
         val output = buf.decodeToString(0, n)
         assertEquals("Hello, Linux!\n", output)
         assertNotEquals("Hello, Linux!", output)
+        assertEquals(0, process.waitForExit(1.seconds))
     }
 }
