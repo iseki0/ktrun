@@ -30,7 +30,7 @@ class HelloTest {
     }
 
     @Test
-    fun execveNotFound(){
+    fun execveNotFound() {
         assertFailsWith<NoSuchFileException> {
             buildProcess {
                 cmdline = listOf("/program_not_exist")
@@ -46,7 +46,7 @@ class HelloTest {
     @Test
     fun chdirNotFound() {
         assertFailsWith<NoSuchFileException> {
-            val process = buildProcess {
+            buildProcess {
                 cmdline = listOf("/usr/bin/sh", "-c", "echo Hello, Linux!")
                 workingDirectory = "/path_not_exist"
                 stdout = inherit()
@@ -59,7 +59,7 @@ class HelloTest {
     }
 
     @Test
-    fun echoShell1(){
+    fun echoShell1() {
         val process = buildProcess {
             cmdline = listOf("/usr/bin/sh", "-c", "echo Hello, Linux!")
             stdout = pipe()
@@ -89,5 +89,26 @@ class HelloTest {
         assertEquals("Hello, Linux!\n", output)
         assertNotEquals("Hello, Linux!", output)
         assertEquals(0, process.waitForExit(1.seconds))
+    }
+
+    @Test
+    fun testHelperKilled() {
+        val deadP = buildProcess {
+            cmdline = listOf("/usr/bin/sh", "-c", "sleep 10")
+            stdout = inherit()
+            stderr = inherit()
+        }
+        buildProcess {
+            cmdline = listOf("kill", ProcessImpl.helper.helperPid.toString())
+        }
+        assertFailsWith<RuntimeException> {
+            deadP.waitForExit()
+        }.also { println(it) }
+        val process = buildProcess {
+            cmdline = listOf("/usr/bin/sh", "-c", "echo Hello, Linux!")
+            stdout = pipe()
+            stderr = inherit()
+        }
+        assertEquals(0, process.waitForExit())
     }
 }

@@ -105,6 +105,7 @@ struct HelperStartResult startHelper() {
     CLOSE_FD_IF_NEED(errFd[0]);
     CLOSE_FD_IF_NEED(sv[1]);
     result.commFd = sv[0];
+    result.helperPid = pid;
     return result;
 
 err:;

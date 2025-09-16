@@ -30,7 +30,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
         private val INHERITED_STDOUT = LinuxFd(STDOUT_FILENO, shouldBeClosed = false)
         private val INHERITED_STDERR = LinuxFd(STDERR_FILENO, shouldBeClosed = false)
 
-        private var helper = SpawnHelper()
+        internal var helper = SpawnHelper()
         private val mutex = ReentrantLock()
 
     }

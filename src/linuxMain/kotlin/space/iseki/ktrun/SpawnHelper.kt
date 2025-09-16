@@ -46,6 +46,8 @@ internal class SpawnHelper {
     private val waitFutures = hashMapOf<Int, CFuture<Int>>()
     private var disconnected = false
 
+    internal val helperPid: Int
+
     init {
         try {
             memScoped {
@@ -53,6 +55,7 @@ internal class SpawnHelper {
                     if (childErrno != 0) failWithErrno("spawnHelper/children", childErrno)
                     if (commFd == -1) failWithErrno("spawnHelper", errno)
                     this@SpawnHelper.fd = LinuxFd(commFd)
+                    this@SpawnHelper.helperPid = helperPid
                 }
                 Worker.start().execute(
                     mode = TransferMode.SAFE,
@@ -85,6 +88,8 @@ internal class SpawnHelper {
                         }
                     }
                     if (msgLen.toUInt() < sizeOf<ProcessExitMsg>().toUInt()) {
+                        if (msgLen == 0L) return
+                        if (msgLen == -1L) failWithErrno("recvmsg", errno)
                         throw RuntimeException("Short read from spawn helper: $msgLen")
                     }
                     spawnMutex.withLock {
@@ -97,7 +102,7 @@ internal class SpawnHelper {
             spawnMutex.withLock {
                 disconnected = true
                 fd.close()
-                val e = RuntimeException("spawn_helper disconnected")
+                val e = RuntimeException("spawn_helper disconnected, pid: $helperPid")
                 waitFutures.values.forEach { it.completeExceptionally(e) }
             }
         }

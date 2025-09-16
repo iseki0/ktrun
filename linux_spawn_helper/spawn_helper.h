@@ -16,6 +16,7 @@ int initHelper();
 struct HelperStartResult {
     int commFd;
     int childErrno;
+    int helperPid;
 };
 
 struct HelperStartResult startHelper();
