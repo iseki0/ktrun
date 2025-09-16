@@ -26,31 +26,27 @@ internal fun strerror(errno: Int): String {
     return platform.posix.strerror(errno)?.toKStringFromUtf8().orEmpty()
 }
 
-internal fun tryTranslateErrno(call: String, errno: Int): Throwable? {
+internal fun tryTranslateErrno(call: String, errno: Int, file: String): Throwable? {
     return when (errno) {
         ENOSYS -> UnsupportedOperationException("Unsupported operation $call")
         ENOMEM -> OutOfMemoryError("Resource is not enough in $call")
         EIO -> IOException("I/O error in $call")
+        EACCES, EPERM, EISDIR -> AccessDeniedException(file, null, strerror(errno))
+        ENOENT -> NoSuchFileException(file, null, strerror(errno))
+        ENOTDIR -> NotDirectoryException(file)
         else -> null
     }
 }
 
-internal fun translateFsErrorNoThrow(call: String, errno: Int, file: String) = when(errno) {
-    EACCES, EPERM, EISDIR -> AccessDeniedException(file, null, strerror(errno))
-    ENOENT -> NoSuchFileException(file, null, strerror(errno))
-    ENOTDIR -> NotDirectoryException(file)
-    else -> translateErrnoNoThrow(call, errno)
+internal fun translateErrnoNoThrow(call: String, errno: Int, file: String = ""): Throwable {
+    return tryTranslateErrno(call, errno, file) ?: SyscallException(call, errno)
 }
 
-internal fun translateErrnoNoThrow(call: String, errno: Int): Throwable {
-    return tryTranslateErrno(call, errno) ?: SyscallException(call, errno)
-}
-
-internal fun failWithErrno(call: String, errno: Int): Nothing {
-    throw translateErrnoNoThrow(call, errno)
+internal fun failWithErrno(call: String, errno: Int, file: String = ""): Nothing {
+    throw translateErrnoNoThrow(call, errno, file)
 }
 
 @OptIn(ExperimentalNativeApi::class)
-internal fun panicWithErrno(call: String, errno:Int): Nothing {
+internal fun panicWithErrno(call: String, errno: Int): Nothing {
     terminateWithUnhandledException(translateErrnoNoThrow(call, errno))
 }

@@ -168,6 +168,7 @@ internal class CFuture<T> {
                 result = value
                 error = failure
                 if (!isSet) {
+                    println("do waitFn, $isSet=$isSet, value=$value, failure=$failure")
                     waitFn()
                     continue
                 }

@@ -2,8 +2,14 @@ package space.iseki.ktrun
 
 import platform.posix.close
 import platform.posix.errno
+import kotlin.experimental.ExperimentalNativeApi
 
-private val f: (Int) -> Unit = { if (close(it) == -1) translateErrnoNoThrow("close", errno) }
+@OptIn(ExperimentalNativeApi::class)
+private val f: (Int) -> Unit = {
+    if (close(it) == -1) {
+        terminateWithUnhandledException(translateErrnoNoThrow("close", errno))
+    }
+}
 
 private val f0: (Int) -> Unit = {}
 

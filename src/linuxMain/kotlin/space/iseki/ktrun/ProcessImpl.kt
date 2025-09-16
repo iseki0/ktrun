@@ -55,86 +55,98 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
 
             @Suppress("NOTHING_TO_INLINE")
             inline fun <T : AutoCloseable> T.badClose() = also { badCloseList.add(it) }
-            when (pb.stdin) {
-                ProcessIOHandler.NULL -> {
-                    stdinPipe = null
-                    stdin = NUL_DEV
+            try {
+                when (pb.stdin) {
+                    ProcessIOHandler.NULL -> {
+                        stdinPipe = null
+                        stdin = NUL_DEV
+                    }
+
+                    ProcessIOHandler.PIPE -> {
+                        val (r, w) = pipe2(O_CLOEXEC)
+                        stdinPipe = LinuxWritable(w).badClose()
+                        stdin = r.normalClose()
+                    }
+
+                    ProcessIOHandler.INHERIT -> {
+                        stdinPipe = null
+                        stdin = INHERITED_STDIN
+                    }
+
+                    is ProcessIOHandler.Path -> TODO()
                 }
 
-                ProcessIOHandler.PIPE -> {
-                    val (r, w) = pipe2(O_CLOEXEC)
-                    stdinPipe = LinuxWritable(w).badClose()
-                    stdin = r.normalClose()
+                when (pb.stdout) {
+                    ProcessIOHandler.NULL -> {
+                        stdoutPipe = null
+                        stdout = NUL_DEV
+                    }
+
+                    ProcessIOHandler.PIPE -> {
+                        val (r, w) = pipe2(O_CLOEXEC)
+                        stdoutPipe = LinuxReadable(r).badClose()
+                        stdout = w.normalClose()
+                    }
+
+                    ProcessIOHandler.INHERIT -> {
+                        stdoutPipe = null
+                        stdout = INHERITED_STDOUT
+                    }
+
+                    is ProcessIOHandler.Path -> TODO()
+                }
+                when (pb.stderr) {
+                    ProcessIOHandler.NULL -> {
+                        stderrPipe = null
+                        stderr = NUL_DEV
+                    }
+
+                    ProcessIOHandler.PIPE -> {
+                        val (r, w) = pipe2(O_CLOEXEC)
+                        stderrPipe = LinuxReadable(r).badClose()
+                        stderr = w.normalClose()
+                    }
+
+                    ProcessIOHandler.INHERIT -> {
+                        stderrPipe = null
+                        stderr = INHERITED_STDERR
+                    }
+
+                    is ProcessIOHandler.Path -> TODO()
                 }
 
-                ProcessIOHandler.INHERIT -> {
-                    stdinPipe = null
-                    stdin = INHERITED_STDIN
+                val debugName = Uuid.random().toString()
+
+                fun doSpawn() = helper.sendSpawnRequest(
+                    debugName = debugName,
+                    file = pb.cmdline.first(),
+                    argv = pb.cmdline.toTypedArray(),
+                    envp = pb.environment?.map { (k, v) -> "$k=$v" }?.toTypedArray(),
+                    cwd = pb.workingDirectory,
+                    stdinFd = stdin,
+                    stdoutFd = stdout,
+                    stderrFd = stderr,
+                    waitFuture = waitFuture,
+                )
+
+                this@ProcessImpl.pid = mutex.withLock {
+                    try {
+                        doSpawn().toLong()
+                    } catch (_: SpawnHelper.SpawnHelperDead) {
+                        helper = SpawnHelper()
+                        doSpawn().toLong()
+                    }
                 }
-
-                is ProcessIOHandler.Path -> TODO()
-            }
-
-            when (pb.stdout) {
-                ProcessIOHandler.NULL -> {
-                    stdoutPipe = null
-                    stdout = NUL_DEV
+                normalCloseList.forEach { it.close() }
+            } catch (th: Throwable) {
+                for (it in badCloseList) {
+                    try {
+                        it.close()
+                    } catch (th0: Throwable) {
+                        th.addSuppressed(th0)
+                    }
                 }
-
-                ProcessIOHandler.PIPE -> {
-                    val (r, w) = pipe2(O_CLOEXEC)
-                    stdoutPipe = LinuxReadable(r).badClose()
-                    stdout = w.normalClose()
-                }
-
-                ProcessIOHandler.INHERIT -> {
-                    stdoutPipe = null
-                    stdout = INHERITED_STDOUT
-                }
-
-                is ProcessIOHandler.Path -> TODO()
-            }
-            when (pb.stderr) {
-                ProcessIOHandler.NULL -> {
-                    stderrPipe = null
-                    stderr = NUL_DEV
-                }
-
-                ProcessIOHandler.PIPE -> {
-                    val (r, w) = pipe2(O_CLOEXEC)
-                    stderrPipe = LinuxReadable(r).badClose()
-                    stderr = w.normalClose()
-                }
-
-                ProcessIOHandler.INHERIT -> {
-                    stderrPipe = null
-                    stderr = INHERITED_STDERR
-                }
-
-                is ProcessIOHandler.Path -> TODO()
-            }
-
-            val debugName = Uuid.random().toString()
-
-            fun doSpawn() = helper.sendSpawnRequest(
-                debugName = debugName,
-                file = pb.cmdline.first(),
-                argv = pb.cmdline.toTypedArray(),
-                envp = pb.environment?.map { (k, v) -> "$k=$v" }?.toTypedArray(),
-                cwd = pb.workingDirectory,
-                stdinFd = stdin,
-                stdoutFd = stdout,
-                stderrFd = stderr,
-                waitFuture = waitFuture,
-            )
-
-            this@ProcessImpl.pid = mutex.withLock {
-                try {
-                    doSpawn().toLong()
-                } catch (_: SpawnHelper.SpawnHelperDead) {
-                    helper = SpawnHelper()
-                    doSpawn().toLong()
-                }
+                throw th
             }
         }
     }

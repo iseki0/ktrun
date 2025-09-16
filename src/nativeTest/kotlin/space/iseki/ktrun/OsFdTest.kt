@@ -20,13 +20,21 @@ class OsFdTest {
 
     @Test
     fun test1() {
+        gcAndAssert(0)
+        println("OsResourceInternalHolder.counter.value: ${OsResourceInternalHolder.counter.value}")
         val a = {
+            println("fn start")
             assertEquals(0, OsResourceInternalHolder.counter.value)
             OsResource(1) {}
             assertEquals(1, OsResourceInternalHolder.counter.value)
+            println("fn end")
         }
         a()
-        gcAndAssert(0)
+        try {
+            gcAndAssert(0)
+        } finally {
+            println("OsResourceInternalHolder.counter.value: ${OsResourceInternalHolder.counter.value}")
+        }
     }
 
     @Volatile

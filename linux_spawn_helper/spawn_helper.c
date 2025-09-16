@@ -53,6 +53,10 @@ struct HelperStartResult startHelper() {
     ON_ERR_GOTO(pipe2(errFd, O_CLOEXEC), err);
     ON_ERR_GOTO(socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, sv), err);
 
+    sigset_t all = {0};
+    sigset_t oldmask = {0};
+    MUST_OK(sigfillset(&all));
+    MUST_OK(sigprocmask(SIG_SETMASK, &all, &oldmask));
     const int pid = ON_ERR_GOTO(fork(), err);
     if (pid == 0) {
         // children
@@ -60,7 +64,7 @@ struct HelperStartResult startHelper() {
         // Reset all signal handlers to be ignored, mimicking the original code's logic.
         // This prevents the child from inheriting unintended signal handlers.
         struct sigaction sa = {0};
-        sa.sa_handler = SIG_IGN;
+        sa.sa_handler = SIG_DFL;
         for (int i = 1; i < NSIG; i++) {
             // SIGKILL and SIGSTOP cannot be caught or ignored; attempting to set a handler for them will fail.
             // We skip them to be explicit.
@@ -81,6 +85,7 @@ struct HelperStartResult startHelper() {
         fullWriteOrExit(errFd[1], &e, sizeof(e));
         _exit(1);
     }
+    MUST_OK(sigprocmask(SIG_SETMASK, &oldmask, NULL));
     // parent
     CLOSE_FD_IF_NEED(errFd[1]);
     const int childErrnoLen = readFull(errFd[0], &result.childErrno, sizeof(result.childErrno));
@@ -114,7 +119,7 @@ err:;
 }
 
 int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, char *cwd, int stdinFd,
-                     int stdoutFd, int stderrFd) {
+                     int stdoutFd, int stderrFd, bool *chdirFailed) {
     REQUIRE_NOT_NULL(file);
     REQUIRE_NOT_NULL(argv);
     errno = 0;
@@ -189,13 +194,16 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
         goto cleanup;
     }
     // handle child error
-    int childErrno = 0;
-    const int childErrnoLen = ON_ERR_GOTO(readFull(childErrFd[0], &childErrno, sizeof(childErrno)), cleanup);
+    int childErrno[2] = {0, 0};
+    const int childErrnoLen = ON_ERR_GOTO(readFull(childErrFd[0], childErrno, sizeof(childErrno)), cleanup);
     if (childErrnoLen != sizeof(childErrno) && childErrnoLen != 0) {
-        childErrno = EBADMSG;
+        childErrno[0] = EBADMSG;
     }
-    if (childErrno != 0) {
-        errno = childErrno;
+    if (childErrno[1] == 1) {
+        *chdirFailed = true;
+    }
+    if (childErrno[0] != 0) {
+        errno = childErrno[0];
         goto cleanup;
     }
     return cloneResult.pid;

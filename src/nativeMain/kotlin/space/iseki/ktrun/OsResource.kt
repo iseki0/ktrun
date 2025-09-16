@@ -15,15 +15,16 @@ internal class OsResourceInternalHolder<T>(
         val counter = atomic(0)
     }
 
+    val tracing = tracingEnabled
     init {
-        if (tracingEnabled) {
+        if (tracing) {
+            println("Tracing: resource allocated: $this -> $resource")
             counter.addAndGet(1)
         }
     }
 
     private var closed = atomic(false)
     override fun close() {
-
         if (closed.compareAndSet(expect = false, update = true)) {
             try {
                 closeFn(resource)
@@ -31,8 +32,13 @@ internal class OsResourceInternalHolder<T>(
                 closed.value = false
                 throw th
             }
-            if (tracingEnabled) {
-                counter.addAndGet(-1)
+            if (tracing) {
+                if (counter.addAndGet(-1) < 0) {
+                    error("OsResource counter < 0, close called too many times?")
+                }
+                if (counter.value < 0) {
+                    error("OsResource counter < 0, close called too many times?(2)")
+                }
             }
         }
     }

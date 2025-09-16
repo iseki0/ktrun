@@ -27,13 +27,31 @@ class HelloTest {
     }
 
     @Test
-    fun notFound(){
+    fun execveNotFound(){
         assertFailsWith<NoSuchFileException> {
             val process = buildProcess {
                 cmdline = listOf("/program_not_exist")
                 stdout = inherit()
                 stderr = inherit()
             }
+        }.also {
+            println(it)
+            assertEquals("/program_not_exist", it.file)
+        }
+    }
+
+    @Test
+    fun chdirNotFound() {
+        assertFailsWith<NoSuchFileException> {
+            val process = buildProcess {
+                cmdline = listOf("/usr/bin/sh", "-c", "echo Hello, Linux!")
+                workingDirectory = "/path_not_exist"
+                stdout = inherit()
+                stderr = inherit()
+            }
+        }.also {
+            println(it)
+            assertEquals("/path_not_exist", it.file)
         }
     }
 

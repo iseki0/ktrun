@@ -44,16 +44,23 @@ void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int errFd,
     struct clone_args ca = {0};
     ca.flags = CLONE_PIDFD;
     ca.pidfd = (__u64) &pidfd;
+    ca.exit_signal = SIGCHLD;
 
     childPid = ON_ERR_GOTO_W(syscall(SYS_clone3, &ca, sizeof(ca)), cleanup);
     if (childPid == 0) {
         // -------------------------- Child Process --------------------------
+        int chdirFailed = 0;
         ON_ERR_GOTO_W(dup2(childFd0, STDIN_FILENO), childErr);
         CLOSE_UNUSED(childFd0);
         ON_ERR_GOTO_W(dup2(childFd1, STDOUT_FILENO), childErr);
         CLOSE_UNUSED(childFd1);
         ON_ERR_GOTO_W(dup2(childFd2, STDERR_FILENO), childErr);
         CLOSE_UNUSED(childFd2);
+        if (option.cwd != NULL) {
+            chdirFailed = 1;
+            ON_ERR_GOTO_W(chdir(option.cwd), childErr);
+            chdirFailed = 0;
+        }
         if (option.envp != NULL) {
             ON_ERR_GOTO_W(execvpe(option.file, option.argv, option.envp), childErr);
         } else {
@@ -65,7 +72,7 @@ void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int errFd,
         // reporting error
         const int savedErrno = errno;
         fullWriteOrExit(errFd, &savedErrno, sizeof(savedErrno));
-        fullWriteOrExit(errFd, errWhere, strlen(errWhere) + 1);
+        fullWriteOrExit(errFd, &chdirFailed, sizeof(chdirFailed));
         _exit(1);
         // -------------------------- Child Process --------------------------
     }
@@ -208,7 +215,7 @@ int main() {
             if (ev.events & EPOLLIN) {
                 errno = 0;
                 int wstatus = 0;
-                waitpid(EPOLL_DATA_PID(ev), &wstatus, WNOHANG);
+                waitpid(EPOLL_DATA_PID(ev), &wstatus, 0);
                 if (errno == EINTR) {
                     continue;
                 }

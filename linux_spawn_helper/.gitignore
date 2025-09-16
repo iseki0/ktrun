@@ -1,2 +1,5 @@
 /cmake-build-linux-musl
 /build-*
+
+/.idea/*
+!/.idea/codeStyles
