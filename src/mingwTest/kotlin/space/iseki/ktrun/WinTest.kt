@@ -17,15 +17,17 @@ import kotlin.uuid.Uuid
 class WinTest {
     @Test
     fun testPipeHandleGC() {
+        OsResourceInternalHolder.tracingEnabled = true
+        assertEquals(0, OsResourceInternalHolder.counter.value)
         fun aa() {
             WinPipe()
         }
         aa()
-        assertNotEquals(0, WinHandle.winHandleCounter.value, "WinHandle counter should be greater than 0")
+        assertNotEquals(0, OsResourceInternalHolder.counter.value, "WinHandle counter should be greater than 0")
         repeat(3) {
             GC.collect()
         }
-        assertEquals(0, WinHandle.winHandleCounter.value, "WinHandle counter should be 0 after GC")
+        assertEquals(0, OsResourceInternalHolder.counter.value, "WinHandle counter should be 0 after GC")
     }
 
     @Test
@@ -182,7 +184,7 @@ class WinTest {
         repeat(3) {
             GC.collect()
         }
-        assertEquals(0, WinHandle.winHandleCounter.value, "WinHandle counter should be 0 after GC")
+        assertEquals(0, OsResourceInternalHolder.counter.value, "WinHandle counter should be 0 after GC")
     }
 
 }

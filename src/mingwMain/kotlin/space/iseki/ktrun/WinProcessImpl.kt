@@ -231,7 +231,7 @@ internal class WinProcessImpl(
         memScoped {
             val exitCode = alloc<DWORDVar>()
             val f = waitHelper(dur) { dur0 ->
-                val waitR = if (dur0.isInfinite()) INFINITE else dur0.inWholeMilliseconds.toUInt()
+                val waitR = dur0.inWholeMilliseconds.toUInt()
                 when (val r = WaitForSingleObject(procecssHandle.handle, waitR)) {
                     WAIT_FAILED -> throwLastWinError(
                         apiName = "WaitForSingleObject",
