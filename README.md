@@ -6,7 +6,7 @@ A simple util to execute commands in Kotlin/Multiplatform projects. Without othe
 
 - JVM(java.lang.ProcessBuilder): Ready to use
 - Windows(CreateProcessW): Ready to use
-- Linux(posix_spawn): WIP
+- Linux(clone/exec with seperated helper process): Ready to use
 
 ## Usage
 
