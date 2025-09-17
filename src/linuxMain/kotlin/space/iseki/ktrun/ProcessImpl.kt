@@ -139,6 +139,13 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                 }
                 normalCloseList.forEach { it.close() }
             } catch (th: Throwable) {
+                for (it in normalCloseList) {
+                    try {
+                        it.close()
+                    } catch (th0: Throwable) {
+                        th.addSuppressed(th0)
+                    }
+                }
                 for (it in badCloseList) {
                     try {
                         it.close()
