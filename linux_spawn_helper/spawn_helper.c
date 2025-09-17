@@ -19,7 +19,26 @@
 extern const unsigned char _binary_linux_spawn_helper_bin_start[];
 extern const unsigned char _binary_linux_spawn_helper_bin_end[];
 
-int binaryMemFd = -1;
+static int binaryMemFd = -1;
+
+static int readFull(const int fd, void *buf, const int count) {
+    int totalRead = 0;
+    while (totalRead < count) {
+        const int r = read(fd, (char *) buf + totalRead, count - totalRead);
+        if (r < 0) {
+            if (errno == EINTR) {
+                continue; // Interrupted, try again
+            }
+            return -1; // Error occurred
+        }
+        if (r == 0) {
+            break; // EOF reached
+        }
+        totalRead += r;
+    }
+    return totalRead; // Return total bytes read
+}
+
 
 int initHelper() {
     size_t sz = (size_t) (_binary_linux_spawn_helper_bin_end - _binary_linux_spawn_helper_bin_start);

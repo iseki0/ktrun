@@ -29,8 +29,70 @@ int EPOLL_FD;
 
 #define CLOSE_UNUSED(fd)  if(fd > 2) { MUST_OK(close(fd)); fd = 0; }
 
+struct EpollData {
+    int fd;
+    pid_t pid;
+};
 
-void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int errFd, int cloneMsgFd) {
+#define EPOLL_DATA_FD(ev) (((struct EpollData *)(ev).data.ptr)->fd)
+#define EPOLL_DATA_PID(ev) (((struct EpollData *)(ev).data.ptr)->pid)
+
+
+int setNonBlock(const int fd) {
+    const int flags = fcntl(fd, F_GETFL);
+    if (flags == -1) {
+        return -1;
+    }
+    if (flags & O_NONBLOCK) return 0;
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) return -1;
+    return 0;
+}
+
+static int clearNonBlock(const int fd) {
+    const int flags = fcntl(fd, F_GETFL);
+    if (flags == -1) {
+        return -1;
+    }
+    if (!(flags & O_NONBLOCK)) return 0;
+    if (fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) == -1) return -1;
+    return 0;
+}
+
+static int clearCloexec(const int fd) {
+    const int flags = fcntl(fd, F_GETFD);
+    if (flags == -1) {
+        return -1;
+    }
+    if (!(flags & FD_CLOEXEC)) return 0;
+    if (fcntl(fd, F_SETFD, flags & ~FD_CLOEXEC) == -1) return -1;
+    return 0;
+}
+
+static int setCloexec(const int fd) {
+    const int flags = fcntl(fd, F_GETFD);
+    if (flags == -1) {
+        return -1;
+    }
+    if (flags & FD_CLOEXEC) return 0;
+    if (fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == -1) return -1;
+    return 0;
+}
+
+
+static int addToEpoll(const int epollFd, const int fd, const pid_t pid, const uint32_t events) {
+    struct epoll_event ev = {0};
+    ev.events = events;
+    ev.data.ptr = malloc(sizeof(struct EpollData));
+    if (ev.data.ptr == NULL) {
+        errno = ENOMEM;
+        return -1;
+    }
+    ((struct EpollData *) ev.data.ptr)->fd = fd;
+    ((struct EpollData *) ev.data.ptr)->pid = pid;
+    return epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &ev);
+}
+
+static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int errFd, int cloneMsgFd) {
     struct SpawnProcessOption option = {0};
     int pidfd = 0;
     const char *errWhere = NULL;
@@ -94,7 +156,7 @@ cleanup:;
         CLOSE_UNUSED(pidfd);
 }
 
-void recvMessage() {
+static void recvMessage() {
     // dummy buffer, UDS required must have at least 1 byte
     char buf = 0;
     // message header

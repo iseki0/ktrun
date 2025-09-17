@@ -11,7 +11,10 @@ extern "C" {
 
 int pipe2(int pipefd[2], int flags);
 
+#define initHelper space_iseki_spawnhelper_initHelper
 int initHelper();
+
+#define HelperStartResult space_iseki_spawnhelper_HelperStartResult
 
 struct HelperStartResult {
     int commFd;
@@ -19,8 +22,10 @@ struct HelperStartResult {
     int helperPid;
 };
 
+#define startHelper space_iseki_spawnhelper_startHelper
 struct HelperStartResult startHelper();
 
+#define sendSpawnRequest space_iseki_spawnhelper_sendSpawnRequest
 int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, char *cwd, int stdinFd,
                      int stdoutFd, int stderrFd, bool *chdirFailed);
 

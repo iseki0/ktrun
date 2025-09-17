@@ -20,10 +20,10 @@
 
 #ifdef __cplusplus
 extern "C" {
-
-
 #endif
 
+#define PREFIXED(name) space_iseki_spawnhelper_##name
+#define SpawnProcessOption PREFIXED(SpawnProcessOption)
 struct SpawnProcessOption {
     char *file;
     char *cwd;
@@ -31,12 +31,16 @@ struct SpawnProcessOption {
     char **envp;
 };
 
+#define SpawnProcessOption_parse PREFIXED(SpawnProcessOption_parse)
 int SpawnProcessOption_parse(struct SpawnProcessOption *option, char *buf);
 
+#define SpawnProcessOption_free PREFIXED(SpawnProcessOption_free)
 void SpawnProcessOption_free(struct SpawnProcessOption *option);
 
+#define SpawnProcessOption_bytesSize PREFIXED(SpawnProcessOption_bytesSize)
 size_t SpawnProcessOption_bytesSize(const struct SpawnProcessOption *option);
 
+#define SpawnProcessOption_bytes PREFIXED(SpawnProcessOption_bytes)
 void SpawnProcessOption_bytes(const struct SpawnProcessOption *option, char *buf);
 
 struct ProcessExitMsg {

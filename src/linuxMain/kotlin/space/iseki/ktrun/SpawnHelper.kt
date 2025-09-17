@@ -20,8 +20,9 @@ import platform.posix.iovec
 import platform.posix.msghdr
 import platform.posix.recvmsg
 import space.iseki.ktrun.native.ProcessExitMsg
-import space.iseki.ktrun.native.initHelper
-import space.iseki.ktrun.native.startHelper
+import space.iseki.ktrun.native.space_iseki_spawnhelper_sendSpawnRequest
+import space.iseki.ktrun.native.space_iseki_spawnhelper_startHelper
+import space.iseki.ktrun.native.space_iseki_spawnhelper_initHelper
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.native.concurrent.ObsoleteWorkersApi
 import kotlin.native.concurrent.TransferMode
@@ -32,7 +33,7 @@ internal class SpawnHelper {
     companion object {
         init {
             memScoped {
-                if (initHelper() == -1) {
+                if (space_iseki_spawnhelper_initHelper() == -1) {
                     val errno = errno
                     tryTranslateErrno("initHelper", errno, "")?.let { throw it }
                     throw RuntimeException("initHelper failed: errno=$errno, ${strerror(errno)}")
@@ -51,7 +52,7 @@ internal class SpawnHelper {
     init {
         try {
             memScoped {
-                startHelper().useContents {
+                space_iseki_spawnhelper_startHelper().useContents {
                     if (childErrno != 0) failWithErrno("spawnHelper/children", childErrno)
                     if (commFd == -1) failWithErrno("spawnHelper", errno)
                     this@SpawnHelper.fd = LinuxFd(commFd)
@@ -125,7 +126,7 @@ internal class SpawnHelper {
             }
             memScoped {
                 val chdirFailed = alloc<BooleanVar>()
-                val pid = space.iseki.ktrun.native.sendSpawnRequest(
+                val pid = space_iseki_spawnhelper_sendSpawnRequest(
                     helperFd = fd.unsafeFd,
                     debugName = debugName.cstr,
                     file = file.cstr,

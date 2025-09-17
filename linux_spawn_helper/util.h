@@ -56,28 +56,7 @@
     count;                                          \
 })
 
-int clearCloexec(int fd);
-
-int setCloexec(int fd);
-
-int setNonBlock(int fd);
-
-int clearNonBlock(int fd);
-
-int addToEpoll(int epollFd, int fd, pid_t pid, uint32_t events);
-
-struct EpollData {
-    int fd;
-    pid_t pid;
-};
-
-#define EPOLL_DATA_FD(ev) (((struct EpollData *)(ev).data.ptr)->fd)
-#define EPOLL_DATA_PID(ev) (((struct EpollData *)(ev).data.ptr)->pid)
-
-ssize_t fullWrite(int fd, const void *buf, size_t count);
-
+#define fullWriteOrExit space_iseki_spawnhelper_fullWriteOrExit
 void fullWriteOrExit(int fd, const void *buf, size_t count);
-
-int readFull(int fd, void *buf, int count);
 
 #endif

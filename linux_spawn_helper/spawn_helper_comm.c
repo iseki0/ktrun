@@ -11,7 +11,7 @@
 
 #define CHECK_ERR(cond) if(cond == -1 ) goto err;
 
-void doFreeStringIfNotNull(char **input) {
+static void doFreeStringIfNotNull(char **input) {
     REQUIRE_NOT_NULL(input);
     char *str = *input;
     if (str == NULL) return;
@@ -19,7 +19,7 @@ void doFreeStringIfNotNull(char **input) {
     *input = NULL;
 }
 
-void doFreeStringArrayIfNotNull(char ***input) {
+static void doFreeStringArrayIfNotNull(char ***input) {
     REQUIRE_NOT_NULL(input);
     char **arr = *input;
     if (arr == NULL) return;
@@ -30,7 +30,7 @@ void doFreeStringArrayIfNotNull(char ***input) {
     *input = NULL;
 }
 
-int doAllocStringArray(char ***target, const size_t n) {
+static int doAllocStringArray(char ***target, const size_t n) {
     REQUIRE_NOT_NULL(target);
     REQUIRE_NULL(*target);
     *target = (char **) malloc((n + 1) * sizeof(char *));

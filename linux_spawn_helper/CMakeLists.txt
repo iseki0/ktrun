@@ -87,7 +87,9 @@ add_library(
         require_not_null.c
         ${CMAKE_CURRENT_BINARY_DIR}/linux_spawn_helper.o
 )
+
 target_compile_options(spawn_helper_lib PUBLIC -fno-sanitize=undefined)
+target_compile_options(spawn_helper_lib PRIVATE -fvisibility=hidden)
 
 target_link_libraries(
         hello_test

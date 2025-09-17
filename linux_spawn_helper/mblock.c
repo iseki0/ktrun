@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include "require_not_null.h"
+#include "mblock.h"
 
 size_t MBlock_SizeOfCString(const char *cstr) {
     REQUIRE_NOT_NULL(cstr);

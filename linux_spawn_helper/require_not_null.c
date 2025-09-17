@@ -3,11 +3,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-void doPanic_abort() {
+static void doPanic_abort() {
     abort();
 }
 
-void doPanic_writeString(const char *msg) {
+static void doPanic_writeString(const char *msg) {
     size_t len = 0;
     while (msg[len] != '\0') {
         len++;
@@ -20,7 +20,7 @@ void doPanic_writeString(const char *msg) {
     }
 }
 
-void doPanic(const char *const msg, const char *const msg2, const char *const file, const int line) {
+void space_iseki_spawnhelper_doPanic(const char *const msg, const char *const msg2, const char *const file, const int line) {
     doPanic_writeString("Panic: ");
     doPanic_writeString(msg);
     doPanic_writeString(msg2);
