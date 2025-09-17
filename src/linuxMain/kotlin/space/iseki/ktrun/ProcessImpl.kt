@@ -56,7 +56,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
             @Suppress("NOTHING_TO_INLINE")
             inline fun <T : AutoCloseable> T.badClose() = also { badCloseList.add(it) }
             try {
-                when (pb.stdin) {
+                when (val p = pb.stdin) {
                     ProcessIOHandler.NULL -> {
                         stdinPipe = null
                         stdin = NUL_DEV
@@ -73,10 +73,13 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                         stdin = INHERITED_STDIN
                     }
 
-                    is ProcessIOHandler.Path -> TODO()
+                    is ProcessIOHandler.Path -> {
+                        stdinPipe = null
+                        stdin = openFileRead(p.path).normalClose()
+                    }
                 }
 
-                when (pb.stdout) {
+                when (val p = pb.stdout) {
                     ProcessIOHandler.NULL -> {
                         stdoutPipe = null
                         stdout = NUL_DEV
@@ -93,9 +96,12 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                         stdout = INHERITED_STDOUT
                     }
 
-                    is ProcessIOHandler.Path -> TODO()
+                    is ProcessIOHandler.Path -> {
+                        stdoutPipe = null
+                        stdout = openFileWrite(p.path).normalClose()
+                    }
                 }
-                when (pb.stderr) {
+                when (val p = pb.stderr) {
                     ProcessIOHandler.NULL -> {
                         stderrPipe = null
                         stderr = NUL_DEV
@@ -112,7 +118,10 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                         stderr = INHERITED_STDERR
                     }
 
-                    is ProcessIOHandler.Path -> TODO()
+                    is ProcessIOHandler.Path -> {
+                        stderrPipe = null
+                        stderr = openFileWrite(p.path).normalClose()
+                    }
                 }
 
                 val debugName = Uuid.random().toString()

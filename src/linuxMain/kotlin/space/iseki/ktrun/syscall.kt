@@ -32,4 +32,15 @@ internal fun pipe2(flag: Int): Pair<LinuxFd, LinuxFd> {
     }
 }
 
+internal fun openFileRead(path: String): LinuxFd {
+    val fd = platform.posix.open(path, platform.posix.O_RDONLY)
+    if (fd == -1) failWithErrno("open", platform.posix.errno, path)
+    return LinuxFd(fd)
+}
+
+internal fun openFileWrite(path: String): LinuxFd {
+    val fd = platform.posix.open(path, platform.posix.O_WRONLY or platform.posix.O_CREAT or platform.posix.O_TRUNC)
+    if (fd == -1) failWithErrno("open", platform.posix.errno, path)
+    return LinuxFd(fd)
+}
 
