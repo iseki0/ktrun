@@ -1,10 +1,9 @@
 #ifndef _SPAWN_HELPER_UTIL_H
 #define _SPAWN_HELPER_UTIL_H 1
 
-#include <fcntl.h>
+#include <errno.h>
 #include <sys/epoll.h>
 #include <string.h>
-#include <stdlib.h>
 
 #define PASSING_ERR(expr) ({typeof(expr) _e = (expr); if(_e == -1) return _e;})
 
@@ -48,15 +47,16 @@
     __val;                              \
 })
 
-
-#define COUNT_STRING_ARRAY(arr)                     \
-({                                                  \
-    size_t count = 0;                               \
-    for(const char *p = *arr; p!=NULL; p++) count++;  \
-    count;                                          \
-})
-
 #define fullWriteOrExit space_iseki_spawnhelper_fullWriteOrExit
-void fullWriteOrExit(int fd, const void *buf, size_t count);
+static void fullWriteOrExit(const int fd, const void *buf, const size_t count) {
+    ssize_t totalWritten = 0;
+    while (totalWritten < count) {
+        const ssize_t written = write(fd, (const char *) buf + totalWritten, count - totalWritten);
+        if (written < 0) {
+            _exit(errno);
+        }
+        totalWritten += written;
+    }
+}
 
 #endif

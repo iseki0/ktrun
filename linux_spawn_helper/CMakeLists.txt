@@ -9,9 +9,6 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 add_executable(linux_spawn_helper
         main.c
         spawn_helper_comm.c
-        util.c
-        mblock.c
-        require_not_null.c
 )
 
 include(FetchContent)
@@ -30,10 +27,7 @@ enable_testing()
 add_executable(
         hello_test
         spawn_helper_comm.c
-        util.c
         hello_test.cpp
-        mblock.c
-        require_not_null.c
         mblock_gtest.cc
         spawn_process_comm_gtest.cpp
 )
@@ -81,10 +75,7 @@ add_custom_command(
 add_library(
         spawn_helper_lib
         spawn_helper.c
-        mblock.c
-        util.c
         spawn_helper_comm.c
-        require_not_null.c
         ${CMAKE_CURRENT_BINARY_DIR}/linux_spawn_helper.o
 )
 

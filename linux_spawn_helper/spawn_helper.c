@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
+#include <fcntl.h>
 
 #define MFD_CLOEXEC 0x0001U
 #define SYS_memfd_create			319
