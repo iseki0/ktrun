@@ -1,6 +1,9 @@
 package space.iseki.ktrun
 
+import org.junit.Assume
+import org.junit.BeforeClass
 import java.lang.Thread.sleep
+import java.util.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -10,8 +13,18 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+
 @OptIn(ExperimentalUuidApi::class)
 class WinTest {
+    companion object {
+        @JvmStatic
+        @BeforeClass
+        fun checkIfWindows() {
+            val os = System.getProperty("os.name").lowercase(Locale.getDefault())
+            Assume.assumeTrue("Test skipped: This test runs only on Windows.", os.contains("win"))
+        }
+    }
+
 
     @Test
     fun testEchoHello() {
