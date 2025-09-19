@@ -209,21 +209,27 @@ TEST(SpawnProcessOptionTest, ManyArgumentsAndEnvironmentVars) {
     SpawnProcessOption option = {};
     option.file = const_cast<char*>("/bin/test");
     
-    // Create many arguments
-    std::vector<char*> args;
+    // Create many arguments - keep storage alive through entire test
     std::vector<std::string> arg_storage;
+    std::vector<char*> args;
+    arg_storage.reserve(20);  // Reserve space to prevent reallocation
+    args.reserve(21);         // 20 args + nullptr
+    
     for (int i = 0; i < 20; i++) {
-        arg_storage.push_back("arg" + std::to_string(i));
+        arg_storage.emplace_back("arg" + std::to_string(i));
         args.push_back(const_cast<char*>(arg_storage.back().c_str()));
     }
     args.push_back(nullptr);
     option.argv = args.data();
     
-    // Create many environment variables  
-    std::vector<char*> envs;
+    // Create many environment variables - keep storage alive through entire test
     std::vector<std::string> env_storage;
+    std::vector<char*> envs;
+    env_storage.reserve(15);  // Reserve space to prevent reallocation
+    envs.reserve(16);         // 15 env vars + nullptr
+    
     for (int i = 0; i < 15; i++) {
-        env_storage.push_back("VAR" + std::to_string(i) + "=value" + std::to_string(i));
+        env_storage.emplace_back("VAR" + std::to_string(i) + "=value" + std::to_string(i));
         envs.push_back(const_cast<char*>(env_storage.back().c_str()));
     }
     envs.push_back(nullptr);

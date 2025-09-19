@@ -113,23 +113,28 @@ TEST(BoundaryTest, SpawnProcessOption_ReasonableFields) {
     SpawnProcessOption option = {};
     option.file = const_cast<char*>("/bin/test");
     
-    // Create a small reasonable number of arguments
-    std::vector<char*> args;
+    // Create a small reasonable number of arguments - keep storage alive
     std::vector<std::string> arg_storage;
+    std::vector<char*> args;
+    arg_storage.reserve(10);  // Reserve space to prevent reallocation
+    args.reserve(11);         // 10 args + nullptr
     
     // Test with a reasonable number of arguments
     for (int i = 0; i < 10; i++) {
-        arg_storage.push_back("arg" + std::to_string(i));
+        arg_storage.emplace_back("arg" + std::to_string(i));
         args.push_back(const_cast<char*>(arg_storage.back().c_str()));
     }
     args.push_back(nullptr);
     option.argv = args.data();
     
-    // Create reasonable number of environment variables
-    std::vector<char*> envs;
+    // Create reasonable number of environment variables - keep storage alive
     std::vector<std::string> env_storage;
+    std::vector<char*> envs;
+    env_storage.reserve(5);   // Reserve space to prevent reallocation
+    envs.reserve(6);          // 5 env vars + nullptr
+    
     for (int i = 0; i < 5; i++) {
-        env_storage.push_back("VAR" + std::to_string(i) + "=value" + std::to_string(i));
+        env_storage.emplace_back("VAR" + std::to_string(i) + "=value" + std::to_string(i));
         envs.push_back(const_cast<char*>(env_storage.back().c_str()));
     }
     envs.push_back(nullptr);
@@ -150,12 +155,12 @@ TEST(BoundaryTest, SpawnProcessOption_ReasonableFields) {
     // Verify all entries
     EXPECT_STREQ(option.file, parsed.file);
     for (int i = 0; i < 10; i++) {
-        EXPECT_STREQ(option.argv[i], parsed.argv[i]);
+        EXPECT_STREQ(option.argv[i], parsed.argv[i]) << "Mismatch at argv[" << i << "]";
     }
     EXPECT_EQ(parsed.argv[10], nullptr);
     
     for (int i = 0; i < 5; i++) {
-        EXPECT_STREQ(option.envp[i], parsed.envp[i]);
+        EXPECT_STREQ(option.envp[i], parsed.envp[i]) << "Mismatch at envp[" << i << "]";
     }
     EXPECT_EQ(parsed.envp[5], nullptr);
     
