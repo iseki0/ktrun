@@ -85,6 +85,7 @@ target_compile_options(spawn_helper_lib PRIVATE -fvisibility=hidden)
 target_link_libraries(
         hello_test
         GTest::gtest_main
+        spawn_helper_lib
 )
 
 include(GoogleTest)

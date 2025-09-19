@@ -53,6 +53,20 @@ val linuxX64NativePartBuild = tasks.register("linuxX64NativePartBuild", Exec::cl
     workingDir("linux_spawn_helper/build-x64")
     commandLine("ninja")
 }
+val linuxX64NativePartTest = tasks.register("linuxX64NativePartTest", Exec::class.java) {
+    dependsOn(linuxX64NativePartBuild)
+    workingDir("linux_spawn_helper/build-x64")
+    commandLine("ctest")
+    onlyIf {
+        // Check if the operating system name starts with "Linux"
+        System.getProperty("os.name").startsWith("Linux")
+    }
+}
+
+// Associate your CTest task with the main 'test' task
+tasks.named("linuxX64Test") {
+    dependsOn(linuxX64NativePartTest)
+}
 
 tasks.named("cinteropDoForkAndExecLinuxX64") {
     dependsOn(linuxX64NativePartBuild)
