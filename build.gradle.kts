@@ -44,23 +44,35 @@ kotlin {
 }
 
 val linuxX64NativePartCMake = tasks.register("linuxX64NativePartCMake", Exec::class.java) {
-    File("linux_spawn_helper/build-x64").mkdirs()
-    workingDir("linux_spawn_helper/build-x64")
+    doFirst { File("linux_spawn_helper/cmake-build-linux-musl").mkdirs() }
+    workingDir("linux_spawn_helper/cmake-build-linux-musl")
     commandLine("cmake", "--preset", "linux-musl", "..")
 }
 val linuxX64NativePartBuild = tasks.register("linuxX64NativePartBuild", Exec::class.java) {
     dependsOn(linuxX64NativePartCMake)
-    workingDir("linux_spawn_helper/build-x64")
+    workingDir("linux_spawn_helper/cmake-build-linux-musl")
     commandLine("ninja")
 }
 val linuxX64NativePartTest = tasks.register("linuxX64NativePartTest", Exec::class.java) {
     dependsOn(linuxX64NativePartBuild)
-    workingDir("linux_spawn_helper/build-x64")
+    workingDir("linux_spawn_helper/cmake-build-linux-musl")
     commandLine("ctest")
     onlyIf {
         // Check if the operating system name starts with "Linux"
         System.getProperty("os.name").startsWith("Linux")
     }
+}
+val linuxX64NativePartClean = tasks.register("linuxX64NativePartClean", Exec::class.java) {
+    workingDir("linux_spawn_helper/cmake-build-linux-musl")
+    commandLine("ninja", "clean")
+    dependsOn(linuxX64NativePartCMake)
+    onlyIf {
+        File("linux_spawn_helper/cmake-build-linux-musl", "build.ninja").exists()
+    }
+}
+
+tasks.clean {
+    dependsOn(linuxX64NativePartClean)
 }
 
 // Associate your CTest task with the main 'test' task
