@@ -47,7 +47,7 @@ jobs:
           build-scan-terms-of-use-agree: "yes"
           gradle-version: wrapper
       - name: Run Build
-        run: chmod +x ./gradlew && ./gradlew build
+        run: ./gradlew build --stacktrace
       - name: Upload build reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
