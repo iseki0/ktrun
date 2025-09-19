@@ -88,4 +88,6 @@ target_link_libraries(
 )
 
 include(GoogleTest)
-#gtest_discover_tests(hello_test)
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    gtest_discover_tests(hello_test)
+endif ()
