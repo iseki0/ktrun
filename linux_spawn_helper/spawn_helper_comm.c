@@ -72,7 +72,7 @@ int SpawnProcessOption_parse(struct SpawnProcessOption *option, char *buf) {
     }
     // envp
     if (header.envpSet) {
-        CHECK_ERR(doAllocStringArray(&option->envp, header.envpNumber))
+        CHECK_ERR(doAllocStringArray(&option->envp, header.envpNumber));
         for (size_t i = 0; i < header.envpNumber; i++) {
             CHECK_ERR(MBlock_GetCString(buf, &option->envp[i], &buf));
         }

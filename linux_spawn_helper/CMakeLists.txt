@@ -30,6 +30,7 @@ add_executable(
         hello_test.cpp
         mblock_gtest.cc
         spawn_process_comm_gtest.cpp
+        error_handling_gtest.cpp
 )
 
 find_program(CMAKE_OBJCOPY NAMES llvm-objcopy objcopy)

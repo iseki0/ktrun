@@ -185,3 +185,191 @@ TEST(MBlockTest, GetCString_EmptyString) {
 
     expect_cd_region(storage.data() + L + need, R);
 }
+
+// Additional comprehensive tests for MBlock functions
+
+TEST(MBlockTest, PutCString_NullBufOut_DoesNotAdvance) {
+    const char* s = "test";
+    const size_t need = MBlock_SizeOfCString(s);
+    
+    std::vector<uint8_t> storage(need + 16);
+    fill_cd(storage.data(), storage.size());
+    
+    char* base = reinterpret_cast<char*>(storage.data());
+    
+    // Test with null bufOut - should not crash
+    MBlock_PutCString(base, s, nullptr);
+    
+    // Verify string was written correctly
+    expect_cstr_region(storage.data(), need, s);
+    
+    // Verify fence after string is intact
+    expect_cd_region(storage.data() + need, 16);
+}
+
+TEST(MBlockTest, GetCString_NullBufOut_DoesNotAdvance) {
+    const char* s = "hello";
+    const size_t need = MBlock_SizeOfCString(s);
+    
+    std::vector<uint8_t> storage(need + 8);
+    fill_cd(storage.data(), storage.size());
+    
+    char* base = reinterpret_cast<char*>(storage.data());
+    
+    // Write the string first
+    char* cursor = base;
+    MBlock_PutCString(base, s, &cursor);
+    
+    // Read with null bufOut
+    char* out = nullptr;
+    int rc = MBlock_GetCString(base, &out, nullptr);
+    ASSERT_EQ(rc, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(std::string(out), s);
+    
+    // Verify memory is still properly allocated
+    free(out);
+}
+
+TEST(MBlockTest, MultipleStrings_LongSequence) {
+    std::vector<std::string> strings = {
+        "first", "second_string", "", "fourth", "a", "very_long_string_with_many_characters"
+    };
+    
+    // Calculate total size needed
+    size_t total_size = 0;
+    for (const auto& s : strings) {
+        total_size += MBlock_SizeOfCString(s.c_str());
+    }
+    
+    const size_t L = 8, R = 8;
+    std::vector<uint8_t> storage(L + total_size + R);
+    fill_cd(storage.data(), storage.size());
+    
+    char* base = reinterpret_cast<char*>(storage.data() + L);
+    
+    // Write all strings
+    char* cursor = base;
+    for (const auto& s : strings) {
+        char* old_cursor = cursor;
+        MBlock_PutCString(cursor, s.c_str(), &cursor);
+        ASSERT_EQ(cursor, old_cursor + MBlock_SizeOfCString(s.c_str()));
+    }
+    ASSERT_EQ(cursor, base + total_size);
+    
+    // Read all strings back
+    char* reader = base;
+    for (size_t i = 0; i < strings.size(); i++) {
+        char* out = nullptr;
+        char* old_reader = reader;
+        int rc = MBlock_GetCString(reader, &out, &reader);
+        ASSERT_EQ(rc, 0) << "Failed reading string " << i;
+        ASSERT_NE(out, nullptr) << "Null output for string " << i;
+        EXPECT_EQ(std::string(out), strings[i]) << "Mismatch at string " << i;
+        ASSERT_EQ(reader, old_reader + MBlock_SizeOfCString(strings[i].c_str()));
+        free(out);
+    }
+    ASSERT_EQ(reader, base + total_size);
+    
+    // Verify fences
+    expect_cd_region(storage.data(), L);
+    expect_cd_region(storage.data() + L + total_size, R);
+}
+
+TEST(MBlockTest, SizeOfCString_VariousLengths) {
+    EXPECT_EQ(MBlock_SizeOfCString(""), 1u);
+    EXPECT_EQ(MBlock_SizeOfCString("a"), 2u);
+    EXPECT_EQ(MBlock_SizeOfCString("ab"), 3u);
+    EXPECT_EQ(MBlock_SizeOfCString("abc"), 4u);
+    EXPECT_EQ(MBlock_SizeOfCString("hello world"), 12u);
+    
+    // Test with special characters
+    EXPECT_EQ(MBlock_SizeOfCString("hello\nworld"), 12u);
+    EXPECT_EQ(MBlock_SizeOfCString("hello\tworld"), 12u);
+    EXPECT_EQ(MBlock_SizeOfCString("hello world!@#$%^&*()"), 22u);
+}
+
+TEST(MBlockTest, PutCString_WithSpecialCharacters) {
+    const char* special_strings[] = {
+        "hello\nworld",
+        "hello\tworld", 
+        "hello world!@#$%^&*()",
+        "unicode_äöü",
+        "path/to/file.txt",
+        "/usr/bin/env",
+        "VAR=value with spaces"
+    };
+    
+    for (const char* s : special_strings) {
+        const size_t need = MBlock_SizeOfCString(s);
+        
+        const size_t L = 8, R = 8;
+        std::vector<uint8_t> storage(L + need + R);
+        fill_cd(storage.data(), storage.size());
+        
+        char* base = reinterpret_cast<char*>(storage.data() + L);
+        
+        char* cursor = base;
+        MBlock_PutCString(base, s, &cursor);
+        ASSERT_EQ(cursor, base + need);
+        
+        // Verify string was written correctly
+        expect_cstr_region(storage.data() + L, need, s);
+        
+        // Verify fences
+        expect_cd_region(storage.data(), L);
+        expect_cd_region(storage.data() + L + need, R);
+        
+        // Verify we can read it back
+        char* out = nullptr;
+        char* next = base;
+        int rc = MBlock_GetCString(base, &out, &next);
+        ASSERT_EQ(rc, 0);
+        ASSERT_NE(out, nullptr);
+        EXPECT_EQ(std::string(out), s);
+        ASSERT_EQ(next, base + need);
+        free(out);
+    }
+}
+
+TEST(MBlockTest, GetCString_MemoryIntegrity) {
+    // Test that GetCString properly allocates and doesn't corrupt memory
+    const char* test_strings[] = {
+        "short",
+        "much_longer_string_to_test_allocation",
+        "",
+        "a",
+        "String with spaces and special chars: !@#$%"
+    };
+    
+    std::vector<char*> allocated_strings;
+    
+    for (const char* s : test_strings) {
+        const size_t need = MBlock_SizeOfCString(s);
+        std::vector<uint8_t> storage(need + 16);
+        fill_cd(storage.data(), storage.size());
+        
+        char* base = reinterpret_cast<char*>(storage.data());
+        
+        // Write string
+        char* cursor = base;
+        MBlock_PutCString(base, s, &cursor);
+        
+        // Read string
+        char* out = nullptr;
+        char* next = base;
+        int rc = MBlock_GetCString(base, &out, &next);
+        ASSERT_EQ(rc, 0);
+        ASSERT_NE(out, nullptr);
+        EXPECT_EQ(std::string(out), s);
+        
+        // Store for later verification
+        allocated_strings.push_back(out);
+    }
+    
+    // Verify all strings are still intact
+    for (size_t i = 0; i < allocated_strings.size(); i++) {
+        EXPECT_EQ(std::string(allocated_strings[i]), test_strings[i]);
+        free(allocated_strings[i]);
+    }
+}
