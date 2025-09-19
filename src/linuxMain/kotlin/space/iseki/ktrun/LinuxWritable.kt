@@ -16,6 +16,7 @@ internal class LinuxWritable(val fd: LinuxFd) : Writable {
     override fun close() {
         if (closed) return
         mutex.withLock {
+            if (closed) return
             fd.close()
             closed = true
         }
@@ -25,8 +26,14 @@ internal class LinuxWritable(val fd: LinuxFd) : Writable {
     override fun write(buf: ByteArray, offset: Int, length: Int): Int {
         Writable.checkBounds(buf, offset, length)
         var written = 0
-        while (written < length) {
+        loop@ while (written < length) {
             mutex.withLock {
+                if (closed) {
+                    if (written > 0 && length != 0) {
+                        break@loop
+                    }
+                    throw IOException("Already closed")
+                }
                 val n = buf.usePinned {
                     posixWrite(
                         fd = fd,

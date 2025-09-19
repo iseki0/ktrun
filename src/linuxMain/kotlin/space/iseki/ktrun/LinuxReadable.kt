@@ -15,7 +15,11 @@ internal class LinuxReadable(private val fd: LinuxFd) : Readable {
     private var closed = false
     override fun close() {
         if (closed) return
-        mutex.withLock { fd.close(); closed = true }
+        mutex.withLock {
+            if (closed) return
+            fd.close()
+            closed = true
+        }
     }
 
     override fun read(buf: ByteArray, offset: Int, length: Int): Int {
@@ -23,6 +27,9 @@ internal class LinuxReadable(private val fd: LinuxFd) : Readable {
         if (length == 0) return 0
         while (true) {
             mutex.withLock {
+                if (closed) {
+                    throw IOException("Already closed")
+                }
                 val r = buf.usePinned {
                     posixRead(fd, it.addressOf(offset), length.convert())
                 }.toInt()
