@@ -10,14 +10,13 @@ import platform.posix.ENOMEM
 import platform.posix.ENOSYS
 import platform.posix.ENOTDIR
 import platform.posix.EPERM
-import kotlin.experimental.ExperimentalNativeApi
 
-class SyscallException(
+class ErrnoException(
     val call: String,
     val errorCode: Int,
 ) : IOException() {
     override val message: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        "call: $call, errno: $errorCode, " + strerror(errorCode)
+        "$call, errno: $errorCode, " + strerror(errorCode)
     }
 }
 
@@ -39,14 +38,9 @@ internal fun tryTranslateErrno(call: String, errno: Int, file: String): Throwabl
 }
 
 internal fun translateErrnoNoThrow(call: String, errno: Int, file: String = ""): Throwable {
-    return tryTranslateErrno(call, errno, file) ?: SyscallException(call, errno)
+    return tryTranslateErrno(call, errno, file) ?: ErrnoException(call, errno)
 }
 
 internal fun failWithErrno(call: String, errno: Int, file: String = ""): Nothing {
     throw translateErrnoNoThrow(call, errno, file)
-}
-
-@OptIn(ExperimentalNativeApi::class)
-internal fun panicWithErrno(call: String, errno: Int): Nothing {
-    terminateWithUnhandledException(translateErrnoNoThrow(call, errno))
 }
