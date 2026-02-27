@@ -39,6 +39,12 @@ add_executable(
         error_handling_gtest.cpp
 )
 
+add_executable(
+        spawn_process_comm_test
+        spawn_helper_comm.c
+        spawn_process_comm_test.c
+)
+
 find_program(CMAKE_OBJCOPY NAMES llvm-objcopy objcopy)
 if(NOT CMAKE_OBJCOPY)
     message(FATAL_ERROR "objcopy not found (need llvm-objcopy or objcopy)")
@@ -98,4 +104,5 @@ target_link_libraries(
 include(GoogleTest)
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
     gtest_discover_tests(hello_test)
+    add_test(NAME spawn_process_comm_test COMMAND spawn_process_comm_test)
 endif ()
