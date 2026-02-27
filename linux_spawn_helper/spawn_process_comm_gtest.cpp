@@ -19,7 +19,7 @@ TEST(SpawnProcessOptionTest, BasicSerializationAndParsing) {
     option.argv = args;
     option.envp = nullptr;
     const size_t size = SpawnProcessOption_bytesSize(&option);
-    std::cout << "SpawnProcessOption_bytesSize: " << size << std::endl;
+    EXPECT_GT(size, 0u);
     void *buf = malloc(size + 64);
     memset(buf, 0xcd, size + 64);
     SpawnProcessOption_bytes(&option, static_cast<char *>(buf));
@@ -28,8 +28,6 @@ TEST(SpawnProcessOptionTest, BasicSerializationAndParsing) {
     memcpy(buf2, buf, size);
     SpawnProcessOption option2 = {};
     EXPECT_EQ(0, SpawnProcessOption_parse(&option2, static_cast<char *>(buf2)));
-    std::cout << "parsed" << std::endl;
-    std::cout << "option2.file: " << option2.file << std::endl;
     EXPECT_STREQ(option.file, option2.file);
     EXPECT_EQ(option.envp, option2.envp);
     safe_free_option(&option2);
