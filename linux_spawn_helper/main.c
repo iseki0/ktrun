@@ -98,11 +98,12 @@ static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int
     const char *errWhere = NULL;
     pid_t childPid = -1;
 
+    // Parse memfd payload into heap-allocated SpawnProcessOption.
     ON_ERR_GOTO_W(SpawnProcessOption_parse(&option, p), cleanup);
     ON_ERR_GOTO_W(setCloexec(errFd), cleanup);
     ON_ERR_GOTO_W(setCloexec(cloneMsgFd), cleanup);
 
-    // prepare clone
+    // clone3 + CLONE_PIDFD lets helper track child via pidfd in epoll.
     struct clone_args ca = {0};
     ca.flags = CLONE_PIDFD;
     ca.pidfd = (__u64) &pidfd;
@@ -110,7 +111,7 @@ static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int
 
     childPid = ON_ERR_GOTO_W(syscall(SYS_clone3, &ca, sizeof(ca)), cleanup);
     if (childPid == 0) {
-        // -------------------------- Child Process --------------------------
+        // Child process: install stdio, optional cwd, then exec.
         int chdirFailed = 0;
         ON_ERR_GOTO_W(dup2(childFd0, STDIN_FILENO), childErr);
         CLOSE_UNUSED(childFd0);
@@ -131,7 +132,7 @@ static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int
         // Should not reach here
         errWhere = "unreachable";
     childErr:;
-        // reporting error
+        // Report [errno, chdirFailed] back to client and exit immediately.
         const int savedErrno = errno;
         fullWriteOrExit(errFd, &savedErrno, sizeof(savedErrno));
         fullWriteOrExit(errFd, &chdirFailed, sizeof(chdirFailed));
@@ -139,7 +140,7 @@ static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int
         // -------------------------- Child Process --------------------------
     }
 
-    // Add pidfd to epoll
+    // Parent side: register pidfd and wake epoll loop.
     ON_ERR_GOTO_W(addToEpoll(EPOLL_FD, pidfd, childPid, EPOLLIN | EPOLLHUP | EPOLLERR), cleanup);
     // Wakeup
     const int64_t dummy = 1;
@@ -147,6 +148,7 @@ static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int
     errno = 0;
     errWhere = NULL;
 cleanup:;
+    // Always reply with clone outcome so client can finish request path.
     const struct ProcessCloneResult res = {
         .pid = childPid,
         ._errno = errno,
@@ -188,7 +190,7 @@ static void recvMessage() {
         fprintf(stderr, "Invalid control message length: %lu\n", cmsghdr->cmsg_len);
         exit(1);
     }
-    // fd receiving
+    // Receive fds in strict REQ_* order.
     int fds[REQ_FD_LEN] = {0};
     memcpy(fds, CMSG_DATA(cmsghdr), sizeof(fds));
     for (int i = 0; i < sizeof(fds) / sizeof(fds[0]); i++) {
@@ -203,7 +205,7 @@ static void recvMessage() {
     const int childFd0 = fds[REQ_CHILD_FD0_IDX];
     const int childFd1 = fds[REQ_CHILD_FD1_IDX];
     const int childFd2 = fds[REQ_CHILD_FD2_IDX];
-    // read stat
+    // mmap request payload and dispatch.
     struct stat st;
     MUST_OK(fstat(memFd, &st));
     // mmap
@@ -230,6 +232,10 @@ int main() {
     MUST_OK(clearNonBlock(STDOUT_FILENO));
     MUST_OK(clearNonBlock(STDERR_FILENO));
 
+    // Single-threaded event loop:
+    // - COMM_FD_UDS events: new spawn requests
+    // - pidfd events: child exit notifications
+    // - WAKEUP_FD: self-wakeup after modifying epoll set
     // Setup epoll
     EPOLL_FD = MUST_OK(epoll_create1(EPOLL_CLOEXEC));
 
@@ -268,7 +274,7 @@ int main() {
                 recvMessage();
                 continue;
             }
-            // pidfd event
+            // pidfd event: child terminated, report ProcessExitMsg to client.
             if (ev.events & EPOLLERR) {
                 const pid_t pid = EPOLL_DATA_PID(ev);
                 fprintf(stderr, "pidfd error, pid: %d\n", pid);

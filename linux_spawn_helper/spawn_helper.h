@@ -22,6 +22,9 @@ struct HelperStartResult {
     int helperPid;
 };
 
+extern const unsigned char _binary_linux_spawn_helper_bin_start[];
+extern const unsigned char _binary_linux_spawn_helper_bin_end[];
+
 #define startHelper space_iseki_spawnhelper_startHelper
 struct HelperStartResult startHelper();
 

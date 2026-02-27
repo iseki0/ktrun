@@ -13,6 +13,21 @@
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/zig-linux-musl.cmake",
         "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY"
       }
+    },
+    {
+      "name": "linux-x86_64",
+      "hidden": false,
+      "generator": "Ninja",
+      "environment": {
+        "CC": "${sourceDir}/zig-cc.cmd",
+        "CXX": "${sourceDir}/zig-c++.cmd"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "Linux",
+        "CMAKE_SYSTEM_PROCESSOR": "x86_64",
+        "CMAKE_C_COMPILER_TARGET": "x86_64-linux-gnu",
+        "CMAKE_CXX_COMPILER_TARGET": "x86_64-linux-gnu"
+      }
     }
   ]
 }

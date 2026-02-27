@@ -44,23 +44,23 @@ kotlin {
 }
 
 val linuxX64NativePartCMake = tasks.register("linuxX64NativePartCMake", Exec::class.java) {
-    doFirst { File("spawn_helper/cmake-build-linux-x86_64").mkdirs() }
-    workingDir("spawn_helper/cmake-build-linux-x86_64")
+    doFirst { File("linux_spawn_helper/cmake-build-linux-x86_64").mkdirs() }
+    workingDir("linux_spawn_helper/cmake-build-linux-x86_64")
     commandLine("cmake", "--preset", "linux-x86_64", "..")
 }
 
 val linuxX64NativePartBuild = tasks.register("linuxX64NativePartBuild", Exec::class.java) {
     dependsOn(linuxX64NativePartCMake)
-    workingDir("spawn_helper/cmake-build-linux-x86_64")
+    workingDir("linux_spawn_helper/cmake-build-linux-x86_64")
     commandLine("ninja")
 }
 
 val linuxX64NativePartClean = tasks.register("linuxX64NativePartClean", Exec::class.java) {
-    workingDir("spawn_helper/cmake-build-linux-x86_64")
+    workingDir("linux_spawn_helper/cmake-build-linux-x86_64")
     commandLine("ninja", "clean")
     dependsOn(linuxX64NativePartCMake)
     onlyIf {
-        File("spawn_helper/cmake-build-linux-x86_64", "build.ninja").exists()
+        File("linux_spawn_helper/cmake-build-linux-x86_64", "build.ninja").exists()
     }
 }
 

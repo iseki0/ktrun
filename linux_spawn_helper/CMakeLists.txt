@@ -3,6 +3,12 @@ project(linux_spawn_helper)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Zig toolchain on some versions does not support linker depfile flags
+# like `--dependency-file` emitted by newer CMake/Ninja integration.
+# Disable linker-side depfile generation for both C and CXX targets.
+set(CMAKE_C_LINK_DEPENDS_USE_LINKER FALSE)
+set(CMAKE_CXX_LINK_DEPENDS_USE_LINKER FALSE)
+set(CMAKE_LINK_DEPENDS_USE_LINKER FALSE)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 

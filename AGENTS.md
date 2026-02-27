@@ -4,7 +4,10 @@ These rules are mandatory for this repository.
 
 ## Build Tooling
 
-- Always use Gradle Wrapper (`./gradlew` or `gradlew.bat`), never a system-installed `gradle`.
+- Always use Gradle Wrapper (`./gradlew` or `gradlew.bat`) for all Gradle operations.
+- Never run the system-installed `gradle` command directly.
+- Never run Gradle inside sandboxed execution.
+- If Gradle is required, request elevated execution and run via Gradle Wrapper only.
 - Before upgrading Gradle, check Kotlin-Gradle compatibility first.
 - Do not perform a Gradle upgrade that violates the compatibility matrix.
 
