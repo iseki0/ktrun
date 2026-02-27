@@ -58,6 +58,9 @@ static int createAnonymousTmpFd(const char *const prefix, const bool executable)
     if (fd == -1) {
         return -1;
     }
+    // Keep caller-visible errno stable on the success path.
+    // Some callers probe memfd first, then fallback here, and do not rely on errno
+    // after success.
     const int oldErrno = errno;
     // Unlink immediately so the file lifetime is bound to the fd.
     if (unlink(tmpl) == -1) {
@@ -94,6 +97,7 @@ static int createSharedPayloadFd(const char *const debugName) {
         errno = e;
         return -1;
     }
+    // Request payload only needs read/write mmap; execute permission is unnecessary.
     return createAnonymousTmpFd("spawn-req", false);
 }
 
@@ -263,6 +267,8 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     MUST_OK(munmap(buf, bufSize));
     buf = NULL;
     // FD order must match REQ_* indices defined in spawn_helper_comm.h.
+    // Note: SCM_RIGHTS transfers duplicates, so receiver sees different fd numbers
+    // that refer to the same underlying open-file descriptions.
     int fds[REQ_FD_LEN] = {0};
     fds[REQ_CHILD_FD0_IDX] = stdinFd;
     fds[REQ_CHILD_FD1_IDX] = stdoutFd;
@@ -294,7 +300,8 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     memcpy(CMSG_DATA(cmsghdr), fds, sizeof(fds));
     // send message
     ON_ERR_GOTO(sendmsg(helperFd, &msg, 0), cleanup);
-    // close unneeded fds
+    // Close local writer fds after sendmsg(): receiver already got duplicates.
+    // This ensures EOF semantics on pipes are controlled by helper/child only.
     CLOSE_FD_IF_NEED(memFd);
     CLOSE_FD_IF_NEED(childErrFd[1]);
     CLOSE_FD_IF_NEED(cloneMsgFd[1]);
