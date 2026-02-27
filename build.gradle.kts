@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 
 plugins {
-    kotlin("multiplatform") version "2.2.0"
+    kotlin("multiplatform") version "2.3.10"
     id("org.jetbrains.kotlinx.atomicfu") version "0.27.0"
 }
 
@@ -44,30 +44,23 @@ kotlin {
 }
 
 val linuxX64NativePartCMake = tasks.register("linuxX64NativePartCMake", Exec::class.java) {
-    doFirst { File("linux_spawn_helper/cmake-build-linux-musl").mkdirs() }
-    workingDir("linux_spawn_helper/cmake-build-linux-musl")
-    commandLine("cmake", "--preset", "linux-musl", "..")
+    doFirst { File("spawn_helper/cmake-build-linux-x86_64").mkdirs() }
+    workingDir("spawn_helper/cmake-build-linux-x86_64")
+    commandLine("cmake", "--preset", "linux-x86_64", "..")
 }
+
 val linuxX64NativePartBuild = tasks.register("linuxX64NativePartBuild", Exec::class.java) {
     dependsOn(linuxX64NativePartCMake)
-    workingDir("linux_spawn_helper/cmake-build-linux-musl")
+    workingDir("spawn_helper/cmake-build-linux-x86_64")
     commandLine("ninja")
 }
-val linuxX64NativePartTest = tasks.register("linuxX64NativePartTest", Exec::class.java) {
-    dependsOn(linuxX64NativePartBuild)
-    workingDir("linux_spawn_helper/cmake-build-linux-musl")
-    commandLine("ctest")
-    onlyIf {
-        // Check if the operating system name starts with "Linux"
-        System.getProperty("os.name").startsWith("Linux")
-    }
-}
+
 val linuxX64NativePartClean = tasks.register("linuxX64NativePartClean", Exec::class.java) {
-    workingDir("linux_spawn_helper/cmake-build-linux-musl")
+    workingDir("spawn_helper/cmake-build-linux-x86_64")
     commandLine("ninja", "clean")
     dependsOn(linuxX64NativePartCMake)
     onlyIf {
-        File("linux_spawn_helper/cmake-build-linux-musl", "build.ninja").exists()
+        File("spawn_helper/cmake-build-linux-x86_64", "build.ninja").exists()
     }
 }
 
@@ -75,12 +68,6 @@ tasks.clean {
     dependsOn(linuxX64NativePartClean)
 }
 
-// Associate your CTest task with the main 'test' task
-tasks.named("linuxX64Test") {
-    dependsOn(linuxX64NativePartTest)
-}
-
 tasks.named("cinteropDoForkAndExecLinuxX64") {
     dependsOn(linuxX64NativePartBuild)
 }
-

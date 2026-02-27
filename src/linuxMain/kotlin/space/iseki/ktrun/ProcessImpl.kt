@@ -2,8 +2,16 @@ package space.iseki.ktrun
 
 import kotlinx.atomicfu.locks.ReentrantLock
 import kotlinx.atomicfu.locks.withLock
+import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.convert
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.plus
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.value
+import platform.posix.EINTR
 import platform.posix.O_CLOEXEC
 import platform.posix.SIGKILL
 import platform.posix.STDERR_FILENO
@@ -11,6 +19,7 @@ import platform.posix.STDIN_FILENO
 import platform.posix.STDOUT_FILENO
 import platform.posix.errno
 import platform.posix.open
+import platform.posix.read
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
 import kotlin.uuid.ExperimentalUuidApi
@@ -39,7 +48,8 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
     override val stdoutPipe: Readable?
     override val stderrPipe: Readable?
     override val pid: Long
-    private val waitFuture = CFuture<Int>()
+
+    val waiter: Waiter
 
     init {
         memScoped {
@@ -135,17 +145,26 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                     stdinFd = stdin,
                     stdoutFd = stdout,
                     stderrFd = stderr,
-                    waitFuture = waitFuture,
                 )
 
-                this@ProcessImpl.pid = mutex.withLock {
+                var waitFd: LinuxFd? = null
+                var processPid: Int = -1
+                mutex.withLock {
                     try {
-                        doSpawn().toLong()
+                        doSpawn().let { (pid, fd) ->
+                            waitFd = fd
+                            processPid = pid
+                        }
                     } catch (_: SpawnHelper.SpawnHelperDead) {
                         helper = SpawnHelper()
-                        doSpawn().toLong()
+                        doSpawn().let { (pid, fd) ->
+                            waitFd = fd
+                            processPid = pid
+                        }
                     }
                 }
+                this@ProcessImpl.pid = processPid.toLong()
+                this@ProcessImpl.waiter = Waiter(waitFd!!.badClose())
                 normalCloseList.forEach { it.close() }
             } catch (th: Throwable) {
                 for (it in normalCloseList) {
@@ -169,16 +188,57 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
 
 
     override fun kill() {
-        if (waitFuture.isDone) return
+        TODO()
         platform.posix.kill(pid.toInt(), SIGKILL)
     }
 
-    override fun waitForExit(dur: Duration): Int? {
-        return try {
-            if (dur.isInfinite()) waitFuture.get() else waitFuture.get(dur)
-        } catch (_: CFuture.TimeoutException) {
-            null
+    override fun waitForExit(dur: Duration): Int {
+        TODO()
+    }
+
+    class Waiter(private val fd: LinuxFd) {
+        private val lock = ReentrantLock()
+        private var readStatus = 0
+        private var readLen = 0
+
+        private fun doRead(): Boolean {
+            check(readLen in 0..4)
+            if (readLen >= 4) {
+                return true
+            }
+            memScoped {
+                val data = alloc(readStatus)
+                while (true) {
+                    val n: Int = read(
+                        __fd = fd.unsafeFd,
+                        __buf = data.ptr.reinterpret<ByteVar>().plus(readLen),
+                        __nbytes = (4 - readLen).convert(),
+                    ).convert()
+                    if (n == -1 && errno == EINTR) continue
+                    if (n == -1) failWithErrno("read", errno)
+                    if (n == 0) {
+                        // EOF
+                        readStatus = -1
+                    }
+                    break
+                }
+                readStatus = data.value
+
+            }
+
+            return readLen == 4
         }
+
+        private class Context
+
+        private tailrec fun waitUntilExit(context: Context) {
+        }
+
+        fun waitForExit(dur: Duration): Int {
+            require(dur.isPositive())
+            TODO()
+        }
+
     }
 }
 

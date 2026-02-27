@@ -8,6 +8,7 @@ import kotlinx.cinterop.convert
 import kotlinx.cinterop.usePinned
 import platform.posix.EINTR
 import platform.posix.errno
+import kotlin.experimental.ExperimentalNativeApi
 
 @OptIn(ExperimentalForeignApi::class)
 internal class LinuxReadable(private val fd: LinuxFd) : Readable {
@@ -46,4 +47,24 @@ internal class LinuxReadable(private val fd: LinuxFd) : Readable {
             }
         }
     }
+}
+
+@OptIn(ExperimentalNativeApi::class)
+internal fun Readable.readInt(): Int {
+    val buf = ByteArray(4)
+    val readBytes = this.read(buf, 0, 4)
+    if (readBytes != 4) {
+        throw IOException("Failed to read Int: expected 4 bytes, got $readBytes bytes")
+    }
+    return buf.getIntAt(0)
+}
+
+@OptIn(ExperimentalNativeApi::class)
+internal fun Readable.readLong(): Long {
+    val buf = ByteArray(8)
+    val readBytes = this.read(buf, 0, 8)
+    if (readBytes != 8) {
+        throw IOException("Failed to read Long: expected 8 bytes, got $readBytes bytes")
+    }
+    return buf.getLongAt(0)
 }
