@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 
 plugins {
     kotlin("multiplatform") version "2.3.10"
-    id("org.jetbrains.kotlinx.atomicfu") version "0.27.0"
+    id("org.jetbrains.kotlinx.atomicfu") version "0.31.0"
 }
 
 group = "space.iseki.ktrun"
@@ -16,7 +16,6 @@ repositories {
 dependencies {
     commonTestImplementation(kotlin("test"))
 }
-
 
 kotlin {
     @OptIn(ExperimentalAbiValidation::class) abiValidation {
@@ -55,6 +54,26 @@ val linuxX64NativePartBuild = tasks.register("linuxX64NativePartBuild", Exec::cl
     commandLine("ninja")
 }
 
+val linuxX64NativePartTest = tasks.register("linuxX64NativePartTest", Exec::class.java) {
+    group = "verification"
+    description = "Run Linux C tests (ctest): native on Linux hosts, via WSL on Windows."
+    val osName = System.getProperty("os.name")
+    val isLinuxHost = osName.contains("Linux", ignoreCase = true)
+    val isWindowsHost = osName.contains("Windows", ignoreCase = true)
+    if (isLinuxHost || isWindowsHost) {
+        dependsOn(linuxX64NativePartBuild)
+    }
+    if (isWindowsHost) {
+        commandLine("wsl", "linux_spawn_helper/cmake-build-linux-x86_64/hello_test")
+    } else {
+        commandLine("linux_spawn_helper/cmake-build-linux-x86_64/hello_test")
+    }
+    onlyIf("Linux host or Windows+WSL host required") {
+        val host = System.getProperty("os.name")
+        host.contains("Linux", ignoreCase = true) || host.contains("Windows", ignoreCase = true)
+    }
+}
+
 val linuxX64NativePartClean = tasks.register("linuxX64NativePartClean", Exec::class.java) {
     workingDir("linux_spawn_helper/cmake-build-linux-x86_64")
     commandLine("ninja", "clean")
@@ -70,4 +89,8 @@ tasks.clean {
 
 tasks.named("cinteropDoForkAndExecLinuxX64") {
     dependsOn(linuxX64NativePartBuild)
+}
+
+tasks.check {
+    dependsOn(linuxX64NativePartTest)
 }
