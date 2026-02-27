@@ -19,8 +19,8 @@
       "hidden": false,
       "generator": "Ninja",
       "environment": {
-        "CC": "${sourceDir}/zig-cc.cmd",
-        "CXX": "${sourceDir}/zig-c++.cmd"
+        "CC": "zig cc",
+        "CXX": "zig c++"
       },
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "Linux",
