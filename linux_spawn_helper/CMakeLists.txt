@@ -90,12 +90,14 @@ add_library(
 
 target_compile_options(spawn_helper_lib PUBLIC -fno-sanitize=undefined)
 target_compile_options(spawn_helper_lib PRIVATE -fvisibility=hidden)
+target_compile_definitions(spawn_helper_lib PRIVATE SPAWN_HELPER_TESTING)
 
 target_link_libraries(
         hello_test
         GTest::gtest_main
         spawn_helper_lib
 )
+target_compile_definitions(hello_test PRIVATE SPAWN_HELPER_TESTING)
 
 include(GoogleTest)
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")

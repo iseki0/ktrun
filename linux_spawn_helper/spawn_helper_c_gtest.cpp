@@ -3,6 +3,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <string>
 #include <thread>
 
 #include <fcntl.h>
@@ -157,4 +158,54 @@ TEST(SpawnHelperCTest, SendSpawnRequest_EncodesPayloadAndReturnsPid) {
     close(stdoutPipe[1]);
     close(stderrPipe[0]);
     close(stderrPipe[1]);
+}
+
+TEST(SpawnHelperCTest, CreateAnonymousShmFd_CreatesMappableFd) {
+    const int fd = spawnHelperTest_createAnonymousShmFd("spawn-ut-shm", false);
+    ASSERT_NE(-1, fd);
+
+    constexpr size_t kSize = 4096;
+    ASSERT_EQ(0, ftruncate(fd, static_cast<off_t>(kSize)));
+    void *p = mmap(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(MAP_FAILED, p);
+    std::memset(p, 0x5A, kSize);
+    ASSERT_EQ(0, munmap(p, kSize));
+    ASSERT_EQ(0, close(fd));
+}
+
+TEST(SpawnHelperCTest, CreateSharedPayloadMemfdFd_CreatesMemfdWhenSupported) {
+    const int fd = spawnHelperTest_createSharedPayloadMemfdFd("spawn-req-ut");
+    if (fd == -1 && errno == ENOSYS) {
+        GTEST_SKIP() << "memfd is not supported on this environment";
+    }
+    ASSERT_NE(-1, fd) << "errno=" << errno;
+
+    char linkPath[256] = {0};
+    char procFdPath[64] = {0};
+    std::snprintf(procFdPath, sizeof(procFdPath), "/proc/self/fd/%d", fd);
+    const ssize_t n = readlink(procFdPath, linkPath, sizeof(linkPath) - 1);
+    ASSERT_GT(n, 0);
+    linkPath[n] = '\0';
+
+    const std::string path(linkPath);
+    EXPECT_NE(std::string::npos, path.find("memfd:")) << path;
+
+    ASSERT_EQ(0, close(fd));
+}
+
+TEST(SpawnHelperCTest, CreateSharedPayloadShmFd_CreatesDevShmFd) {
+    const int fd = spawnHelperTest_createSharedPayloadShmFd("spawn-req-ut");
+    ASSERT_NE(-1, fd) << "errno=" << errno;
+
+    char linkPath[256] = {0};
+    char procFdPath[64] = {0};
+    std::snprintf(procFdPath, sizeof(procFdPath), "/proc/self/fd/%d", fd);
+    const ssize_t n = readlink(procFdPath, linkPath, sizeof(linkPath) - 1);
+    ASSERT_GT(n, 0);
+    linkPath[n] = '\0';
+
+    const std::string path(linkPath);
+    EXPECT_NE(std::string::npos, path.find("/dev/shm/")) << path;
+
+    ASSERT_EQ(0, close(fd));
 }

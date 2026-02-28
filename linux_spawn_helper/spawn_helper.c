@@ -87,8 +87,47 @@ static int createAnonymousTmpFd(const char *const prefix, const bool executable)
     return fd;
 }
 
+static int createAnonymousShmFd(const char *const prefix, const bool executable) {
+    // POSIX shm name must start with '/' and contain no other '/'.
+    // Keep a short bounded retry loop for name collisions.
+    const pid_t pid = getpid();
+    for (int i = 0; i < 128; i++) {
+        char name[128];
+        const int n = snprintf(name, sizeof(name), "/%s-%d-%d", prefix, (int) pid, i);
+        if (n < 0 || n >= (int) sizeof(name)) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        const mode_t mode = executable ? 0700 : 0600;
+        const int fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, mode);
+        if (fd == -1) {
+            if (errno == EEXIST) {
+                continue;
+            }
+            return -1;
+        }
+        if (shm_unlink(name) == -1) {
+            const int e = errno;
+            close(fd);
+            errno = e;
+            return -1;
+        }
+        return fd;
+    }
+    errno = EEXIST;
+    return -1;
+}
+
+static int createSharedPayloadMemfdFd(const char *const debugName) {
+    return createMemfdCompat(debugName);
+}
+
+static int createSharedPayloadShmFd(const char *const debugName) {
+    return createAnonymousShmFd(debugName, false);
+}
+
 static int createSharedPayloadFd(const char *const debugName) {
-    int fd = createMemfdCompat(debugName);
+    int fd = createSharedPayloadMemfdFd(debugName);
     if (fd != -1) {
         return fd;
     }
@@ -97,9 +136,26 @@ static int createSharedPayloadFd(const char *const debugName) {
         errno = e;
         return -1;
     }
-    // Request payload only needs read/write mmap; execute permission is unnecessary.
+    fd = createSharedPayloadShmFd("spawn-req");
+    if (fd != -1) {
+        return fd;
+    }
     return createAnonymousTmpFd("spawn-req", false);
 }
+
+#ifdef SPAWN_HELPER_TESTING
+int spawnHelperTest_createAnonymousShmFd(const char *const prefix, const bool executable) {
+    return createAnonymousShmFd(prefix, executable);
+}
+
+int spawnHelperTest_createSharedPayloadMemfdFd(const char *const debugName) {
+    return createSharedPayloadMemfdFd(debugName);
+}
+
+int spawnHelperTest_createSharedPayloadShmFd(const char *const debugName) {
+    return createSharedPayloadShmFd(debugName);
+}
+#endif
 
 static int createHelperExecutableFd() {
     int fd = createMemfdCompat("spawn_helper");
