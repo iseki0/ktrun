@@ -2,24 +2,17 @@ package space.iseki.ktrun
 
 import kotlinx.atomicfu.locks.ReentrantLock
 import kotlinx.atomicfu.locks.withLock
-import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.alloc
-import kotlinx.cinterop.convert
 import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.plus
-import kotlinx.cinterop.ptr
-import kotlinx.cinterop.reinterpret
-import kotlinx.cinterop.value
-import platform.posix.EINTR
 import platform.posix.O_CLOEXEC
+import platform.posix.ESRCH
 import platform.posix.SIGKILL
 import platform.posix.STDERR_FILENO
 import platform.posix.STDIN_FILENO
 import platform.posix.STDOUT_FILENO
 import platform.posix.errno
+import platform.posix.kill
 import platform.posix.open
-import platform.posix.read
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
 import kotlin.uuid.ExperimentalUuidApi
@@ -40,8 +33,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
         private val INHERITED_STDERR = LinuxFd(STDERR_FILENO, shouldBeClosed = false)
 
         internal var helper = SpawnHelper()
-        private val mutex = ReentrantLock()
-
+        private val helperSpawnMutex = ReentrantLock()
     }
 
     override val stdinPipe: Writable?
@@ -49,122 +41,122 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
     override val stderrPipe: Readable?
     override val pid: Long
 
-    val waiter: Waiter
+    private val exitLock = ReentrantLock()
+    private var exited = false
+    private var cachedExitCode: Int? = null
 
     init {
         memScoped {
-            val stdin: LinuxFd
-            val stdout: LinuxFd
-            val stderr: LinuxFd
             val normalCloseList = mutableListOf<AutoCloseable>()
             val badCloseList = mutableListOf<AutoCloseable>()
-            val (errR, errW) = pipe2(O_CLOEXEC)
 
             @Suppress("NOTHING_TO_INLINE")
             inline fun <T : AutoCloseable> T.normalClose() = also { normalCloseList.add(it) }
 
             @Suppress("NOTHING_TO_INLINE")
             inline fun <T : AutoCloseable> T.badClose() = also { badCloseList.add(it) }
+
             try {
+                val stdinFd: LinuxFd
+                val stdoutFd: LinuxFd
+                val stderrFd: LinuxFd
+
                 when (val p = pb.stdin) {
                     ProcessIOHandler.NULL -> {
                         stdinPipe = null
-                        stdin = NUL_DEV
+                        stdinFd = NUL_DEV
                     }
 
                     ProcessIOHandler.PIPE -> {
                         val (r, w) = pipe2(O_CLOEXEC)
                         stdinPipe = LinuxWritable(w).badClose()
-                        stdin = r.normalClose()
+                        stdinFd = r.normalClose()
                     }
 
                     ProcessIOHandler.INHERIT -> {
                         stdinPipe = null
-                        stdin = INHERITED_STDIN
+                        stdinFd = INHERITED_STDIN
                     }
 
                     is ProcessIOHandler.Path -> {
                         stdinPipe = null
-                        stdin = openFileRead(p.path).normalClose()
+                        stdinFd = openFileRead(p.path).normalClose()
                     }
                 }
 
                 when (val p = pb.stdout) {
                     ProcessIOHandler.NULL -> {
                         stdoutPipe = null
-                        stdout = NUL_DEV
+                        stdoutFd = NUL_DEV
                     }
 
                     ProcessIOHandler.PIPE -> {
                         val (r, w) = pipe2(O_CLOEXEC)
                         stdoutPipe = LinuxReadable(r).badClose()
-                        stdout = w.normalClose()
+                        stdoutFd = w.normalClose()
                     }
 
                     ProcessIOHandler.INHERIT -> {
                         stdoutPipe = null
-                        stdout = INHERITED_STDOUT
+                        stdoutFd = INHERITED_STDOUT
                     }
 
                     is ProcessIOHandler.Path -> {
                         stdoutPipe = null
-                        stdout = openFileWrite(p.path).normalClose()
+                        stdoutFd = openFileWrite(p.path).normalClose()
                     }
                 }
-                when (val p = pb.stderr) {
-                    ProcessIOHandler.NULL -> {
-                        stderrPipe = null
-                        stderr = NUL_DEV
-                    }
 
-                    ProcessIOHandler.PIPE -> {
-                        val (r, w) = pipe2(O_CLOEXEC)
-                        stderrPipe = LinuxReadable(r).badClose()
-                        stderr = w.normalClose()
-                    }
+                if (pb.mergeStderrToStdout) {
+                    stderrPipe = null
+                    stderrFd = stdoutFd
+                } else {
+                    when (val p = pb.stderr) {
+                        ProcessIOHandler.NULL -> {
+                            stderrPipe = null
+                            stderrFd = NUL_DEV
+                        }
 
-                    ProcessIOHandler.INHERIT -> {
-                        stderrPipe = null
-                        stderr = INHERITED_STDERR
-                    }
+                        ProcessIOHandler.PIPE -> {
+                            val (r, w) = pipe2(O_CLOEXEC)
+                            stderrPipe = LinuxReadable(r).badClose()
+                            stderrFd = w.normalClose()
+                        }
 
-                    is ProcessIOHandler.Path -> {
-                        stderrPipe = null
-                        stderr = openFileWrite(p.path).normalClose()
+                        ProcessIOHandler.INHERIT -> {
+                            stderrPipe = null
+                            stderrFd = INHERITED_STDERR
+                        }
+
+                        is ProcessIOHandler.Path -> {
+                            stderrPipe = null
+                            stderrFd = openFileWrite(p.path).normalClose()
+                        }
                     }
                 }
 
                 val debugName = Uuid.random().toString()
-
                 fun doSpawn() = helper.sendSpawnRequest(
                     debugName = debugName,
                     file = pb.cmdline.first(),
                     argv = pb.cmdline.toTypedArray(),
                     envp = pb.environment?.map { (k, v) -> "$k=$v" }?.toTypedArray(),
                     cwd = pb.workingDirectory,
-                    stdinFd = stdin,
-                    stdoutFd = stdout,
-                    stderrFd = stderr,
+                    stdinFd = stdinFd,
+                    stdoutFd = stdoutFd,
+                    stderrFd = stderrFd,
                 )
 
-                var waitFd: LinuxFd? = null
-                var processPid: Int = -1
-                mutex.withLock {
+                val processPid = helperSpawnMutex.withLock {
                     try {
-                        doSpawn().let { (pid, fd) ->
-                            waitFd = fd
-                            processPid = pid
-                        }
+                        doSpawn()
                     } catch (_: SpawnHelper.SpawnHelperDead) {
                         helper = SpawnHelper()
-                        doSpawn().let { (pid, fd) ->
-                            waitFd = fd
-                            processPid = pid
-                        }
+                        doSpawn()
                     }
                 }
+
                 this@ProcessImpl.pid = processPid.toLong()
-                this@ProcessImpl.waiter = Waiter(waitFd!!.badClose())
                 normalCloseList.forEach { it.close() }
             } catch (th: Throwable) {
                 for (it in normalCloseList) {
@@ -186,60 +178,24 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
         }
     }
 
-
     override fun kill() {
-        TODO()
-        platform.posix.kill(pid.toInt(), SIGKILL)
+        exitLock.withLock {
+            if (exited) return
+        }
+        if (kill(pid.toInt(), SIGKILL) == -1 && errno != ESRCH) {
+            failWithErrno("kill", errno)
+        }
     }
 
-    override fun waitForExit(dur: Duration): Int {
-        TODO()
-    }
-
-    class Waiter(private val fd: LinuxFd) {
-        private val lock = ReentrantLock()
-        private var readStatus = 0
-        private var readLen = 0
-
-        private fun doRead(): Boolean {
-            check(readLen in 0..4)
-            if (readLen >= 4) {
-                return true
-            }
-            memScoped {
-                val data = alloc(readStatus)
-                while (true) {
-                    val n: Int = read(
-                        __fd = fd.unsafeFd,
-                        __buf = data.ptr.reinterpret<ByteVar>().plus(readLen),
-                        __nbytes = (4 - readLen).convert(),
-                    ).convert()
-                    if (n == -1 && errno == EINTR) continue
-                    if (n == -1) failWithErrno("read", errno)
-                    if (n == 0) {
-                        // EOF
-                        readStatus = -1
-                    }
-                    break
-                }
-                readStatus = data.value
-
-            }
-
-            return readLen == 4
+    override fun waitForExit(dur: Duration): Int? {
+        exitLock.withLock {
+            if (exited) return cachedExitCode
         }
-
-        private class Context
-
-        private tailrec fun waitUntilExit(context: Context) {
+        val code = helper.waitForProcessExit(pid.toInt(), dur) ?: return null
+        exitLock.withLock {
+            exited = true
+            cachedExitCode = code
         }
-
-        fun waitForExit(dur: Duration): Int {
-            require(dur.isPositive())
-            TODO()
-        }
-
+        return code
     }
 }
-
-
