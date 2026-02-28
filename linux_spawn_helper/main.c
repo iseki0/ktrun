@@ -10,6 +10,7 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -26,6 +27,8 @@ int WAKEUP_FD;
 
 // epoll fd, CLOEXEC
 int EPOLL_FD;
+// signalfd for SIGCHLD, CLOEXEC|NONBLOCK
+int SIGCHLD_FD;
 
 #define CLOSE_UNUSED(fd)  if(fd > 2) { MUST_OK(close(fd)); fd = 0; }
 
@@ -92,9 +95,104 @@ static int addToEpoll(const int epollFd, const int fd, const pid_t pid, const ui
     return epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &ev);
 }
 
+static void sendExitMsgToClient(const pid_t pid, const int wstatus) {
+    struct ProcessExitMsg res = {
+        .pid = pid,
+        .exitCode = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : -1,
+    };
+    struct msghdr msg = {0};
+    struct iovec iov = {0};
+    iov.iov_base = &res;
+    iov.iov_len = sizeof(res);
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    MUST_OK(sendmsg(COMM_FD_UDS, &msg, 0));
+}
+
+struct FallbackPidNode {
+    pid_t pid;
+    struct FallbackPidNode *next;
+};
+
+static struct FallbackPidNode *FALLBACK_PID_HEAD = NULL;
+
+static int trackFallbackPid(const pid_t pid) {
+    struct FallbackPidNode *node = malloc(sizeof(struct FallbackPidNode));
+    if (node == NULL) {
+        errno = ENOMEM;
+        return -1;
+    }
+    node->pid = pid;
+    node->next = FALLBACK_PID_HEAD;
+    FALLBACK_PID_HEAD = node;
+    return 0;
+}
+
+static void untrackFallbackPid(const pid_t pid) {
+    struct FallbackPidNode *prev = NULL;
+    struct FallbackPidNode *cur = FALLBACK_PID_HEAD;
+    while (cur != NULL) {
+        if (cur->pid == pid) {
+            if (prev == NULL) {
+                FALLBACK_PID_HEAD = cur->next;
+            } else {
+                prev->next = cur->next;
+            }
+            free(cur);
+            return;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+}
+
+static void reapTrackedFallbackChildren() {
+    struct FallbackPidNode *prev = NULL;
+    struct FallbackPidNode *cur = FALLBACK_PID_HEAD;
+    while (cur != NULL) {
+        int wstatus = 0;
+        const pid_t pid = cur->pid;
+        const pid_t r = waitpid(pid, &wstatus, WNOHANG);
+        if (r == 0) {
+            prev = cur;
+            cur = cur->next;
+            continue;
+        }
+        if (r == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == ECHILD) {
+                struct FallbackPidNode *victim = cur;
+                cur = cur->next;
+                if (prev == NULL) {
+                    FALLBACK_PID_HEAD = cur;
+                } else {
+                    prev->next = cur;
+                }
+                free(victim);
+                continue;
+            }
+            prev = cur;
+            cur = cur->next;
+            continue;
+        }
+        sendExitMsgToClient(pid, wstatus);
+        struct FallbackPidNode *victim = cur;
+        cur = cur->next;
+        if (prev == NULL) {
+            FALLBACK_PID_HEAD = cur;
+        } else {
+            prev->next = cur;
+        }
+        free(victim);
+    }
+}
+
 static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int errFd, int cloneMsgFd) {
     struct SpawnProcessOption option = {0};
     int pidfd = 0;
+    int hasPidfd = 1;
     const char *errWhere = NULL;
     pid_t childPid = -1;
 
@@ -109,7 +207,14 @@ static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int
     ca.pidfd = (__u64) &pidfd;
     ca.exit_signal = SIGCHLD;
 
-    childPid = ON_ERR_GOTO_W(syscall(SYS_clone3, &ca, sizeof(ca)), cleanup);
+    childPid = syscall(SYS_clone3, &ca, sizeof(ca));
+    if (childPid == -1 && (errno == ENOSYS || errno == EPERM)) {
+        hasPidfd = 0;
+        childPid = fork();
+    }
+    if (childPid == -1) {
+        goto cleanup;
+    }
     if (childPid == 0) {
         // Child process: install stdio, optional cwd, then exec.
         int chdirFailed = 0;
@@ -140,11 +245,22 @@ static void handleMessage(char *p, int childFd0, int childFd1, int childFd2, int
         // -------------------------- Child Process --------------------------
     }
 
-    // Parent side: register pidfd and wake epoll loop.
-    ON_ERR_GOTO_W(addToEpoll(EPOLL_FD, pidfd, childPid, EPOLLIN | EPOLLHUP | EPOLLERR), cleanup);
-    // Wakeup
-    const int64_t dummy = 1;
-    ON_ERR_GOTO_W(write(WAKEUP_FD, &dummy, sizeof(dummy)), cleanup);
+    if (hasPidfd) {
+        // Parent side with pidfd: register in epoll and wake epoll loop.
+        ON_ERR_GOTO_W(addToEpoll(EPOLL_FD, pidfd, childPid, EPOLLIN | EPOLLHUP | EPOLLERR), cleanup);
+        const int64_t dummy = 1;
+        ON_ERR_GOTO_W(write(WAKEUP_FD, &dummy, sizeof(dummy)), cleanup);
+    } else {
+        // Fallback path: no pidfd available, track pid and reap via signalfd(SIGCHLD).
+        if (trackFallbackPid(childPid) == -1) {
+            const int e = errno;
+            kill(childPid, SIGKILL);
+            while (waitpid(childPid, NULL, 0) == -1 && errno == EINTR) {
+            }
+            errno = e;
+            goto cleanup;
+        }
+    }
     errno = 0;
     errWhere = NULL;
 cleanup:;
@@ -154,7 +270,7 @@ cleanup:;
         ._errno = errno,
     };
     fullWriteOrExit(cloneMsgFd, &res, sizeof(res));
-    if (res._errno != 0)
+    if (res._errno != 0 && hasPidfd)
         CLOSE_UNUSED(pidfd);
 }
 
@@ -238,6 +354,12 @@ int main() {
     // - WAKEUP_FD: self-wakeup after modifying epoll set
     // Setup epoll
     EPOLL_FD = MUST_OK(epoll_create1(EPOLL_CLOEXEC));
+    // Block SIGCHLD in process, then consume child-exit notifications via signalfd.
+    sigset_t sigchldMask = {0};
+    MUST_OK(sigemptyset(&sigchldMask));
+    MUST_OK(sigaddset(&sigchldMask, SIGCHLD));
+    MUST_OK(sigprocmask(SIG_BLOCK, &sigchldMask, NULL));
+    SIGCHLD_FD = MUST_OK(signalfd(-1, &sigchldMask, SFD_CLOEXEC | SFD_NONBLOCK));
 
     // Setup eventfd, used to wakeup epoll immediately
     WAKEUP_FD = MUST_OK(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
@@ -247,6 +369,7 @@ int main() {
     MUST_OK(setNonBlock(COMM_FD_UDS));
     MUST_OK(setCloexec(COMM_FD_UDS));
     MUST_OK(addToEpoll(EPOLL_FD, COMM_FD_UDS, 0, EPOLLIN|EPOLLHUP|EPOLLERR));
+    MUST_OK(addToEpoll(EPOLL_FD, SIGCHLD_FD, 0, EPOLLIN));
 
     // Wait events
     struct epoll_event events[16];
@@ -274,6 +397,28 @@ int main() {
                 recvMessage();
                 continue;
             }
+            if (fd == SIGCHLD_FD) {
+                while (1) {
+                    struct signalfd_siginfo si = {0};
+                    const ssize_t n = read(SIGCHLD_FD, &si, sizeof(si));
+                    if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                        break;
+                    }
+                    if (n == -1 && errno == EINTR) {
+                        continue;
+                    }
+                    if (n == -1) {
+                        perror("read(signalfd)");
+                        _exit(1);
+                    }
+                    if (n != sizeof(si)) {
+                        fprintf(stderr, "short read from signalfd\n");
+                        _exit(1);
+                    }
+                }
+                reapTrackedFallbackChildren();
+                continue;
+            }
             // pidfd event: child terminated, report ProcessExitMsg to client.
             if (ev.events & EPOLLERR) {
                 const pid_t pid = EPOLL_DATA_PID(ev);
@@ -291,17 +436,7 @@ int main() {
                     perror("waitpid");
                     _exit(1);
                 }
-                struct ProcessExitMsg res = {
-                    .pid = EPOLL_DATA_PID(ev),
-                    .exitCode = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : -1,
-                };
-                struct msghdr msg = {0};
-                struct iovec iov = {0};
-                iov.iov_base = &res;
-                iov.iov_len = sizeof(res);
-                msg.msg_iov = &iov;
-                msg.msg_iovlen = 1;
-                MUST_OK(sendmsg(COMM_FD_UDS, &msg, 0));
+                sendExitMsgToClient(EPOLL_DATA_PID(ev), wstatus);
                 // clean up
                 MUST_OK(epoll_ctl(EPOLL_FD, EPOLL_CTL_DEL, fd, NULL));
                 free(ev.data.ptr);
