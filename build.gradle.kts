@@ -6,6 +6,10 @@ plugins {
     id("org.jetbrains.kotlinx.atomicfu") version "0.31.0"
 }
 
+val osName = System.getProperty("os.name")
+val isLinuxHost = osName.contains("Linux", ignoreCase = true)
+val isWindowsHost = osName.contains("Windows", ignoreCase = true)
+
 group = "space.iseki.ktrun"
 version = "1.0-SNAPSHOT"
 
@@ -57,9 +61,6 @@ val linuxX64NativePartBuild = tasks.register("linuxX64NativePartBuild", Exec::cl
 val linuxX64NativePartTest = tasks.register("linuxX64NativePartTest", Exec::class.java) {
     group = "verification"
     description = "Run Linux C tests (ctest): native on Linux hosts, via WSL on Windows."
-    val osName = System.getProperty("os.name")
-    val isLinuxHost = osName.contains("Linux", ignoreCase = true)
-    val isWindowsHost = osName.contains("Windows", ignoreCase = true)
     if (isLinuxHost || isWindowsHost) {
         dependsOn(linuxX64NativePartBuild)
     }
@@ -71,6 +72,31 @@ val linuxX64NativePartTest = tasks.register("linuxX64NativePartTest", Exec::clas
     onlyIf("Linux host or Windows+WSL host required") {
         val host = System.getProperty("os.name")
         host.contains("Linux", ignoreCase = true) || host.contains("Windows", ignoreCase = true)
+    }
+}
+
+if (isWindowsHost) {
+    val buildDirFile = layout.buildDirectory.get().asFile
+    val testExe = File(buildDirFile, "bin/linuxX64/debugTest/test.kexe").absolutePath
+    val normalized = testExe.replace("\\", "/")
+    val wslExePath = if (normalized.length >= 3 && normalized[1] == ':' && normalized[2] == '/') {
+        val drive = normalized[0].lowercaseChar()
+        "/mnt/$drive${normalized.substring(2)}"
+    } else {
+        normalized
+    }
+
+    val linuxX64TestWsl = tasks.register("linuxX64TestWsl", Exec::class.java) {
+        group = "verification"
+        description = "Run linuxX64 Kotlin/Native tests through WSL on Windows hosts."
+        dependsOn("linkDebugTestLinuxX64")
+        inputs.file(File(buildDirFile, "bin/linuxX64/debugTest/test.kexe"))
+        commandLine("wsl", wslExePath)
+    }
+
+    tasks.named("linuxX64Test") {
+        dependsOn(linuxX64TestWsl)
+        enabled = false
     }
 }
 
