@@ -222,7 +222,7 @@ internal class WinProcessImpl(
     }
 
 
-    override fun kill() {
+    override fun terminate(force: Boolean) {
         TerminateProcess(procecssHandle.handle, 1u)
     }
 
@@ -365,6 +365,5 @@ internal class WinProcessImpl(
 }
 
 internal actual fun launchProcess(builder: ProcessBuilderScopeImpl): Process = WinProcessImpl(builder)
-
 
 

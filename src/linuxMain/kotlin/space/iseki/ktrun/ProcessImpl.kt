@@ -5,14 +5,18 @@ import kotlinx.atomicfu.locks.withLock
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.memScoped
 import platform.posix.O_CLOEXEC
+import platform.posix.EINVAL
+import platform.posix.ENOSYS
 import platform.posix.ESRCH
 import platform.posix.SIGKILL
+import platform.posix.SIGTERM
 import platform.posix.STDERR_FILENO
 import platform.posix.STDIN_FILENO
 import platform.posix.STDOUT_FILENO
 import platform.posix.errno
 import platform.posix.kill
 import platform.posix.open
+import platform.posix.syscall
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.time.Duration
 import kotlin.uuid.ExperimentalUuidApi
@@ -22,6 +26,10 @@ import kotlin.uuid.Uuid
 internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
     @OptIn(ExperimentalNativeApi::class)
     companion object {
+        // linux x86_64 syscall numbers; current target is linuxX64.
+        private const val SYS_PIDFD_SEND_SIGNAL = 424
+        private const val SYS_PIDFD_OPEN = 434
+
         private val NUL_DEV = LinuxFd(
             open("/dev/null", O_CLOEXEC).also {
                 if (it == -1) failWithErrno("open", errno)
@@ -51,6 +59,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
     private val exitLock = ReentrantLock()
     private var exited = false
     private var cachedExitCode: Int? = null
+    private val pidfd: LinuxFd?
 
     init {
         memScoped {
@@ -164,6 +173,7 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
                 }
 
                 this@ProcessImpl.pid = processPid.toLong()
+                this@ProcessImpl.pidfd = openPidfd(processPid)
                 normalCloseList.forEach { it.close() }
             } catch (th: Throwable) {
                 for (it in normalCloseList) {
@@ -185,12 +195,37 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
         }
     }
 
-    override fun kill() {
+    private fun openPidfd(processPid: Int): LinuxFd? {
+        val fd = syscall(SYS_PIDFD_OPEN.toLong(), processPid.toLong(), 0L).toInt()
+        if (fd != -1) return LinuxFd(fd)
+        return when (errno) {
+            ENOSYS, EINVAL, ESRCH -> null
+            else -> null
+        }
+    }
+
+    override fun terminate(force: Boolean) {
         exitLock.withLock {
             if (exited) return
         }
-        if (kill(pid.toInt(), SIGKILL) == -1 && errno != ESRCH) {
-            failWithErrno("kill", errno)
+        val signal = if (force) SIGKILL else SIGTERM
+
+        // pidfd-based signaling avoids PID-reuse races when pidfd is available.
+        val pidfd0 = pidfd
+        if (pidfd0 != null) {
+            val r = syscall(
+                SYS_PIDFD_SEND_SIGNAL.toLong(),
+                pidfd0.unsafeFd.toLong(),
+                signal.toLong(),
+                0L,
+                0L,
+            ).toInt()
+            if (r == 0) return
+            if (r == -1 && errno == ESRCH) return
+        }
+
+        if (kill(pid.toInt(), signal) == -1 && errno != ESRCH) {
+            failWithErrno("kill", errno, file = pid.toString())
         }
     }
 

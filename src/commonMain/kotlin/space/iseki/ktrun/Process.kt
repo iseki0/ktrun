@@ -7,7 +7,8 @@ interface Process {
     val stdoutPipe: Readable?
     val stderrPipe: Readable?
     val pid: Long
-    fun kill()
+    fun terminate(force: Boolean = false)
+    fun kill() = terminate(force = true)
     fun waitForExit(dur: Duration = Duration.INFINITE): Int?
 }
 
