@@ -34,6 +34,13 @@ internal class ProcessImpl(pb: ProcessBuilderScopeImpl) : Process {
 
         internal var helper = SpawnHelper()
         private val helperSpawnMutex = ReentrantLock()
+
+        internal fun terminateHelperForTest() {
+            val helperPid = helper.pid
+            if (kill(helperPid, SIGKILL) == -1 && errno != ESRCH) {
+                failWithErrno("kill", errno)
+            }
+        }
     }
 
     override val stdinPipe: Writable?

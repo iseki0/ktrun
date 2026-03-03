@@ -98,9 +98,7 @@ class HelloTest {
             stdout = inherit()
             stderr = inherit()
         }
-        buildProcess {
-            cmdline = listOf("kill", TODO())
-        }
+        ProcessImpl.terminateHelperForTest()
         assertFailsWith<RuntimeException> {
             deadP.waitForExit()
         }.also { println(it) }
