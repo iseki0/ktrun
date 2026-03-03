@@ -144,7 +144,7 @@ All public C APIs use:
 
 ## 8. Known constraints
 
-- `COMM_FD_UDS` is hardcoded (`3939`) and must match startup `dup2`.
+- `COMM_FD_UDS` is hardcoded (`39`) and must match startup `dup2`.
 - request body binary format is ABI-coupled.
 - helper exits hard on some protocol violations (`exit(1)`).
 - symbols are Linux-specific (`clone3`, pidfd/signalfd behavior, syscall numbers).

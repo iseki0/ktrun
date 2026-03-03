@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-#define COMM_FD_UDS 3939
+#define COMM_FD_UDS 39
 
 #define RES_MASK  (0x12345600)
 #define RES_COMPLETED  (RES_MASK | 2)
