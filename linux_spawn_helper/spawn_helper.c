@@ -7,7 +7,6 @@
 #define _GNU_SOURCE // NOLINT(*-reserved-identifier)
 #include <errno.h>
 #include <limits.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -20,11 +19,6 @@
 
 #define MFD_CLOEXEC 0x0001U
 #define CLOSE_FD_IF_NEED(expr) {if(expr > -1) {if(close(expr) == -1) {perror("close"); abort();}; expr = -1;}}
-
-extern const unsigned char _binary_linux_spawn_helper_bin_start[];
-extern const unsigned char _binary_linux_spawn_helper_bin_end[];
-
-static int binaryMemFd = -1;
 
 // memfd may be blocked/unavailable in some environments (e.g. restricted runtimes).
 // For these errno values we fallback to anonymous tmp files.
@@ -157,19 +151,6 @@ int spawnHelperTest_createSharedPayloadShmFd(const char *const debugName) {
 }
 #endif
 
-static int createHelperExecutableFd() {
-    int fd = createMemfdCompat("spawn_helper");
-    if (fd != -1) {
-        return fd;
-    }
-    const int e = errno;
-    if (!shouldFallbackFromMemfd(e)) {
-        errno = e;
-        return -1;
-    }
-    return createAnonymousTmpFd("spawn-helper", true);
-}
-
 static int readFull(const int fd, void *buf, const int count) {
     int totalRead = 0;
     while (totalRead < count) {
@@ -186,108 +167,6 @@ static int readFull(const int fd, void *buf, const int count) {
         totalRead += r;
     }
     return totalRead; // Return total bytes read
-}
-
-
-int initHelper() {
-    size_t sz = (size_t) (_binary_linux_spawn_helper_bin_end - _binary_linux_spawn_helper_bin_start);
-    // Load helper executable image into an executable fd.
-    // Preferred: memfd; fallback: unlinked temp file.
-    int memfd = -1;
-    memfd = ON_ERR_GOTO(createHelperExecutableFd(), err);
-    ON_ERR_GOTO(ftruncate(memfd, sz), err);
-    const void *const p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-    if (p == MAP_FAILED) {
-        goto err;
-    }
-    memcpy((void *) p, _binary_linux_spawn_helper_bin_start, sz);
-    MUST_OK(munmap((void *) p, sz));
-    binaryMemFd = memfd;
-    return 0;
-err:;
-    const int e = errno;
-    if (memfd != -1) {
-        MUST_OK(close(memfd));
-    }
-    errno = e;
-    return -1;
-}
-
-struct HelperStartResult startHelper() {
-    struct HelperStartResult result = {0};
-    errno = 0;
-
-    int errFd[2] = {-1, -1};
-    int sv[2] = {-1, -1};
-    // errFd: child reports exec failure errno.
-    // sv: control socketpair between client and helper process.
-    ON_ERR_GOTO(pipe2(errFd, O_CLOEXEC), err);
-    ON_ERR_GOTO(socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, sv), err);
-
-    sigset_t all = {0};
-    sigset_t oldmask = {0};
-    MUST_OK(sigfillset(&all));
-    MUST_OK(sigprocmask(SIG_SETMASK, &all, &oldmask));
-    const int pid = ON_ERR_GOTO(fork(), err);
-    if (pid == 0) {
-        // Child branch: wire COMM_FD_UDS, sanitize signal state, then exec helper.
-        ON_ERR_GOTO(dup2(sv[1], COMM_FD_UDS), childErr);
-        // Reset all signal handlers to be ignored, mimicking the original code's logic.
-        // This prevents the child from inheriting unintended signal handlers.
-        struct sigaction sa = {0};
-        sa.sa_handler = SIG_DFL;
-        for (int i = 1; i < NSIG; i++) {
-            // SIGKILL and SIGSTOP cannot be caught or ignored; attempting to set a handler for them will fail.
-            // We skip them to be explicit.
-            if (i == SIGKILL || i == SIGSTOP) continue;
-            // ignore sigaction error, not only for SIGKILL and SIGSTOP.
-            // https://bugzilla.redhat.com/show_bug.cgi?id=53394
-            sigaction(i, &sa, NULL);
-        }
-        sigset_t empty = {0};
-        ON_ERR_GOTO(sigemptyset(&empty), childErr);
-        ON_ERR_GOTO(sigprocmask(SIG_SETMASK, &empty, NULL), childErr);
-        // exec
-        char *argv[] = {"spawn_helper", NULL};
-        extern char **environ;
-        fexecve(binaryMemFd, argv, environ);
-    childErr:;
-        const int e = errno;
-        fullWriteOrExit(errFd[1], &e, sizeof(e));
-        _exit(1);
-    }
-    MUST_OK(sigprocmask(SIG_SETMASK, &oldmask, NULL));
-    // Parent branch: if child wrote errno to errFd, startup failed.
-    CLOSE_FD_IF_NEED(errFd[1]);
-    const int childErrnoLen = readFull(errFd[0], &result.childErrno, sizeof(result.childErrno));
-    if (childErrnoLen == -1) {
-        // read child errno failed
-        result.childErrno = 0;
-        goto err;
-    }
-    if (childErrnoLen != 0) {
-        if (childErrnoLen != sizeof(result.childErrno)) {
-            // read incompleted child errno
-            result.childErrno = EBADMSG;
-        }
-        goto err;
-    }
-
-    CLOSE_FD_IF_NEED(errFd[0]);
-    CLOSE_FD_IF_NEED(sv[1]);
-    result.commFd = sv[0];
-    result.helperPid = pid;
-    return result;
-
-err:;
-    result.commFd = -1;
-    const int e = errno;
-    CLOSE_FD_IF_NEED(errFd[0]);
-    CLOSE_FD_IF_NEED(errFd[1]);
-    CLOSE_FD_IF_NEED(sv[0]);
-    CLOSE_FD_IF_NEED(sv[1]);
-    errno = e;
-    return result;
 }
 
 int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, char *cwd, int stdinFd,

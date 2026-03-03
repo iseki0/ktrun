@@ -5,43 +5,29 @@ It does not describe the C++ implementation under `spawn_helper/`.
 
 ## 1. Components
 
-- Client: code calling `initHelper()`, `startHelper()`, `sendSpawnRequest()` in `spawn_helper.c`.
-- Helper: executable from `linux_spawn_helper/main.c` (started via `fexecve`).
-- Child: target process created by helper using `clone3 + execvp/execvpe`.
+- Client: Kotlin code in `src/linuxMain/.../DefaultSpawnHelperInitOps.kt` creates/starts helper, then calls C `sendSpawnRequest()` in `spawn_helper.c`.
+- Helper: executable from `linux_spawn_helper/main.c` (started via Kotlin `posix_spawn` path).
+- Child: target process created by helper using `clone3` (preferred) or `fork` (fallback), then `execvp/execvpe`.
 
 ## 2. Startup Protocol
 
-### 2.1 Embedded binary loading (`initHelper`)
+### 2.1 Embedded binary loading (Kotlin)
 
-- `initHelper()` copies `_binary_linux_spawn_helper_bin_start..end` into a memfd.
-- That memfd is stored in static `binaryMemFd`.
-- If `mmap/ftruncate/syscall` fails, it returns `-1` and preserves `errno`.
+- Kotlin copies `_binary_linux_spawn_helper_bin_start..end` into an executable fd.
+- Preferred path: memfd (`/proc/self/fd/<fd>` execution).
+- Fallback path: executable temp file (`mkstemp + fchmod + unlink on cleanup`).
 
-### 2.2 Helper process start (`startHelper`)
+### 2.2 Helper process start (Kotlin)
 
-- Parent creates:
-  - `errFd` pipe: child reports pre-exec failure errno.
-  - `sv` socketpair (`AF_UNIX`, `SOCK_SEQPACKET|SOCK_CLOEXEC`): parent-child control channel.
-- Parent blocks all signals before `fork`, restores mask after fork.
-- Child side:
-  - `dup2(sv[1], COMM_FD_UDS)`.
-  - reset signal dispositions to `SIG_DFL` (except `SIGKILL`, `SIGSTOP`).
-  - clear signal mask.
-  - `fexecve(binaryMemFd, ...)`.
-  - on failure write errno to `errFd[1]` then `_exit(1)`.
-- Parent side:
-  - reads `errFd[0]`.
-  - EOF (`0` bytes) means helper exec succeeded.
-  - non-zero read means helper startup failed.
-
-Result type:
-- `struct HelperStartResult { int commFd; int childErrno; int helperPid; }`
+- Kotlin creates `socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC)`.
+- Kotlin `posix_spawn` starts helper executable and `dup2`s helper socket to `COMM_FD_UDS`.
+- The client then uses the parent side of that socket (`helperFd`) for request/exit protocol.
 
 ## 3. Request Protocol (`sendSpawnRequest`)
 
 ## 3.1 Transport
 
-- Channel: `helperFd` (the parent side of `sv` from `startHelper`).
+- Channel: `helperFd` (the parent side of Kotlin-created helper socketpair).
 - Message type: Unix socket message with `SCM_RIGHTS`.
 - A 1-byte dummy payload is required in `iovec`.
 
@@ -90,7 +76,8 @@ Important: this binary format is ABI-dependent (`size_t`, `bool`, struct layout)
 Helper creates:
 - `EPOLL_FD`
 - `WAKEUP_FD` (`eventfd`)
-- monitors `COMM_FD_UDS` and pidfds
+- `SIGCHLD_FD` (`signalfd(SIGCHLD)`)
+- monitors `COMM_FD_UDS`, pidfds (when available), and `SIGCHLD_FD`
 
 ### 4.2 Receive request
 
@@ -103,7 +90,8 @@ Helper creates:
 ### 4.3 Spawn flow
 
 `handleMessage(...)`:
-- `clone3` with `CLONE_PIDFD` and `exit_signal = SIGCHLD`.
+- preferred spawn path: `clone3` with `CLONE_PIDFD` and `exit_signal = SIGCHLD`.
+- fallback spawn path: if `clone3` fails with `ENOSYS` or `EPERM`, helper falls back to `fork()`.
 - child branch:
   - `dup2` stdio fds.
   - optional `chdir(cwd)`.
@@ -112,7 +100,8 @@ Helper creates:
     - errno
     - `chdirFailed` flag (`1` if failure occurred in chdir stage, else `0`)
 - parent branch:
-  - adds pidfd to epoll.
+  - `clone3` path: adds pidfd to epoll.
+  - `fork` fallback path: tracks child pid in an internal list; child exit is reaped from `signalfd(SIGCHLD)` events.
   - writes `ProcessCloneResult { pid, _errno }` to `REQ_CLONE_MSG_IDX`.
 
 ## 5. Client-side response handling in `sendSpawnRequest`
@@ -145,20 +134,20 @@ Note:
 
 Failure sources:
 - local syscall failure in client wrapper (`pipe2`, `sendmsg`, `mmap`, ...)
-- helper clone failure (`ProcessCloneResult._errno`)
+- helper spawn failure (`ProcessCloneResult._errno`) on both `clone3` and fallback `fork` paths
 - child pre-exec failure (`childErr` pipe)
 - protocol/frame mismatch (`EBADMSG`)
 
 All public C APIs use:
 - success: non-negative / valid struct fields
-- failure: return `-1` (or `commFd=-1`) and set `errno`.
+- failure: return `-1` and set `errno`.
 
 ## 8. Known constraints
 
 - `COMM_FD_UDS` is hardcoded (`3939`) and must match startup `dup2`.
 - request body binary format is ABI-coupled.
 - helper exits hard on some protocol violations (`exit(1)`).
-- symbols are Linux-specific (`clone3`, pidfd behavior, syscall numbers).
+- symbols are Linux-specific (`clone3`, pidfd/signalfd behavior, syscall numbers).
 
 ## 9. Source map
 
@@ -167,3 +156,4 @@ All public C APIs use:
 - request serialization: `linux_spawn_helper/spawn_helper_comm.c`
 - protocol constants: `linux_spawn_helper/spawn_helper_comm.h`
 - exported API: `linux_spawn_helper/spawn_helper.h`
+- Kotlin startup path: `src/linuxMain/kotlin/space/iseki/ktrun/DefaultSpawnHelperInitOps.kt`
