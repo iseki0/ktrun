@@ -130,6 +130,14 @@ Note:
 - `sendSpawnRequest()` itself does not consume `ProcessExitMsg`.
 - upper layer must read this channel if it needs async exit events.
 
+## 6.1 Client-side process signal notes
+
+- Kotlin `ProcessImpl.terminate(force)` is implemented on the client side (not through helper protocol messages).
+- On Linux, client signal delivery uses:
+  - preferred: `pidfd_send_signal` (when `pidfd_open` succeeded for the child pid),
+  - fallback: `kill(pid, signal)`.
+- This does not change the helper wire protocol described above.
+
 ## 7. Error model
 
 Failure sources:

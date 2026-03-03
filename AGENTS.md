@@ -21,3 +21,11 @@ These rules are mandatory for this repository.
 
 - Every commit must be signed.
 - Never bypass signing due to permission constraints; resolve permissions via proper escalation.
+
+## Session Notes
+
+- Linux helper control fd constant is `COMM_FD_UDS = 39` (`linux_spawn_helper/spawn_helper_comm.h`). Keep Kotlin/C sides consistent.
+- On Windows, `linuxX64Test` is routed through WSL via `linuxX64TestWsl` task in `build.gradle.kts`.
+- WSL distro behavior can differ (`wsl` default distro here is WSL1, another installed distro is WSL2). For manual validation, use `wsl -d <distro> ...` explicitly.
+- For tests that synchronize on process stdout, `Readable.readNBytes` reads until requested length or EOF. Use exact-length reads for handshake markers (e.g., `READY\n`) to avoid blocking until process exit.
+- Linux `Process.terminate(force=false)` sends `SIGTERM`; `kill()` is forceful alias. Linux implementation prefers `pidfd_send_signal` and falls back to `kill(pid, sig)`.
