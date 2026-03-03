@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.time.Duration.Companion.seconds
 
 class HelloTest {
@@ -98,9 +99,7 @@ class HelloTest {
             stdout = inherit()
             stderr = inherit()
         }
-        buildProcess {
-            cmdline = listOf("kill", ProcessImpl.helper.helperPid.toString())
-        }
+        ProcessImpl.terminateHelperForTest()
         assertFailsWith<RuntimeException> {
             deadP.waitForExit()
         }.also { println(it) }
@@ -110,5 +109,32 @@ class HelloTest {
             stderr = inherit()
         }
         assertEquals(0, process.waitForExit())
+    }
+
+    @Test
+    fun terminateGracefullyUsesSigtermByDefault() {
+        val process = buildProcess {
+            cmdline = listOf("/usr/bin/bash", "-c", "trap 'exit 42' TERM; echo READY; sleep 3")
+            stdout = pipe()
+            stderr = inherit()
+        }
+        val out = ByteArray(6)
+        val n = process.stdoutPipe!!.readNBytes(out, length = 6)
+        assertEquals("READY\n", out.decodeToString(0, n))
+        process.terminate()
+        assertEquals(42, process.waitForExit(6.seconds))
+    }
+
+    @Test
+    fun killAliasRemainsForceful() {
+        val process = buildProcess {
+            cmdline = listOf("/usr/bin/sh", "-c", "trap 'exit 42' TERM; while true; do sleep 1; done")
+            stdout = inherit()
+            stderr = inherit()
+        }
+        process.kill()
+        val code = process.waitForExit(3.seconds)
+        assertNotNull(code)
+        assertEquals(-1, code)
     }
 }

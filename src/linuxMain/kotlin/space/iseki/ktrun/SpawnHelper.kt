@@ -3,109 +3,133 @@ package space.iseki.ktrun
 import kotlinx.atomicfu.locks.ReentrantLock
 import kotlinx.atomicfu.locks.withLock
 import kotlinx.cinterop.BooleanVar
+import kotlinx.cinterop.ByteVar
+import kotlinx.cinterop.CPointerVar
+import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.alloc
+import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.convert
 import kotlinx.cinterop.cstr
+import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.nativeHeap
+import kotlinx.cinterop.pointed
 import kotlinx.cinterop.ptr
+import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.set
 import kotlinx.cinterop.sizeOf
-import kotlinx.cinterop.toCValues
-import kotlinx.cinterop.useContents
+import kotlinx.cinterop.staticCFunction
 import kotlinx.cinterop.value
 import platform.posix.ECONNRESET
 import platform.posix.EINTR
 import platform.posix.EPIPE
 import platform.posix.errno
-import platform.posix.iovec
-import platform.posix.msghdr
-import platform.posix.recvmsg
-import space.iseki.ktrun.native.ProcessExitMsg
-import space.iseki.ktrun.native.space_iseki_spawnhelper_sendSpawnRequest
-import space.iseki.ktrun.native.space_iseki_spawnhelper_startHelper
-import space.iseki.ktrun.native.space_iseki_spawnhelper_initHelper
+import platform.posix.free
+import platform.posix.recv
+import platform.posix.pthread_create
+import platform.posix.pthread_detach
+import platform.posix.pthread_tVar
+import platform.posix.usleep
+import space.iseki.ktrun.native._binary_linux_spawn_helper_bin_end
+import space.iseki.ktrun.native._binary_linux_spawn_helper_bin_start
 import kotlin.experimental.ExperimentalNativeApi
-import kotlin.native.concurrent.ObsoleteWorkersApi
-import kotlin.native.concurrent.TransferMode
-import kotlin.native.concurrent.Worker
+import kotlin.concurrent.Volatile
+import kotlin.time.Duration
+import kotlin.time.TimeSource
+import kotlin.uuid.ExperimentalUuidApi
+import space.iseki.ktrun.native.space_iseki_spawnhelper_sendSpawnRequest as nativeSendSpawnRequest
 
-@OptIn(ObsoleteWorkersApi::class, ExperimentalForeignApi::class, ExperimentalNativeApi::class)
+@OptIn(ExperimentalForeignApi::class)
+private fun spawnHelperReceiverEntry(arg: COpaquePointer?): COpaquePointer? {
+    if (arg == null) return null
+    val idPtr = arg.reinterpret<IntVar>()
+    val helperId = idPtr.pointed.value
+    free(arg)
+    val helper = SpawnHelper.takeById(helperId) ?: return null
+    try {
+        helper.runExitReceiverLoop()
+    } finally {
+        SpawnHelper.removeById(helperId)
+    }
+    return null
+}
+
+internal fun initializeSpawnHelper(ops: SpawnHelperInitOps): SpawnHelperInitResult {
+    val (clientSocketFd, helperSocketFd) = ops.createHelperSocketPair()
+    var shim: SpawnHelperShimExecutable? = null
+    try {
+        shim = ops.createShimExecutable()
+        val pid = ops.spawnShimProcess(shim.execPath, helperSocketFd)
+        return SpawnHelperInitResult(
+            pid = pid,
+            clientSocketFd = clientSocketFd,
+        )
+    } catch (th: Throwable) {
+        ops.closeFd(clientSocketFd)
+        throw th
+    } finally {
+        ops.closeFd(helperSocketFd)
+        if (shim != null) {
+            ops.closeFd(shim.fd)
+            shim.unlinkPath?.let(ops::unlinkPath)
+        }
+    }
+}
+
+@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class, ExperimentalUuidApi::class)
 internal class SpawnHelper {
     companion object {
-        init {
-            memScoped {
-                if (space_iseki_spawnhelper_initHelper() == -1) {
-                    val errno = errno
-                    tryTranslateErrno("initHelper", errno, "")?.let { throw it }
-                    throw RuntimeException("initHelper failed: errno=$errno, ${strerror(errno)}")
-                }
-            }
+        val binSize =
+            _binary_linux_spawn_helper_bin_end.rawValue.toLong() - _binary_linux_spawn_helper_bin_start.rawValue.toLong()
+        private val helperRegistryLock = ReentrantLock()
+        private var nextHelperId: Int = 1
+        private val helperRegistry = mutableMapOf<Int, SpawnHelper>()
+
+        private fun registerHelper(helper: SpawnHelper): Int = helperRegistryLock.withLock {
+            val id = nextHelperId++
+            helperRegistry[id] = helper
+            id
+        }
+        internal fun takeById(id: Int): SpawnHelper? = helperRegistryLock.withLock { helperRegistry[id] }
+        internal fun removeById(id: Int) {
+            helperRegistryLock.withLock { helperRegistry.remove(id) }
         }
     }
 
+    internal val pid: Int
     private val fd: LinuxFd
     private val spawnMutex = ReentrantLock()
-    private val waitFutures = hashMapOf<Int, CFuture<Int>>()
-    private var disconnected = false
+    private val waitMutex = ReentrantLock()
+    private val exitCodes = mutableMapOf<Int, Int>()
+    @Volatile
+    private var receiverDead = false
+    private val helperId: Int
 
-    internal val helperPid: Int
+    constructor() : this(DefaultSpawnHelperInitOps)
 
-    init {
-        try {
-            memScoped {
-                space_iseki_spawnhelper_startHelper().useContents {
-                    if (childErrno != 0) failWithErrno("spawnHelper/children", childErrno)
-                    if (commFd == -1) failWithErrno("spawnHelper", errno)
-                    this@SpawnHelper.fd = LinuxFd(commFd)
-                    this@SpawnHelper.helperPid = helperPid
-                }
-                Worker.start().execute(
-                    mode = TransferMode.SAFE,
-                    producer = { this@SpawnHelper },
-                    job = { it.loop() },
-                )
+    internal constructor(initOps: SpawnHelperInitOps) {
+        val initResult = initializeSpawnHelper(initOps)
+        pid = initResult.pid
+        fd = LinuxFd(initResult.clientSocketFd)
+        helperId = registerHelper(this)
+        memScoped {
+            val tid = alloc<pthread_tVar>()
+            val arg = nativeHeap.alloc<IntVar>()
+            arg.value = helperId
+            val r = pthread_create(
+                tid.ptr,
+                null,
+                staticCFunction(::spawnHelperReceiverEntry),
+                arg.ptr.reinterpret<ByteVar>(),
+            )
+            if (r != 0) {
+                free(arg.ptr)
+                removeById(helperId)
+                failWithErrno("pthread_create", r)
             }
-        } catch (e: Exception) {
-            throw RuntimeException("Failed to start SpawnHelper, ${e.message}", e)
-        }
-    }
-
-    @OptIn(ExperimentalNativeApi::class)
-    private fun loop() {
-        try {
-            while (true) {
-                memScoped {
-                    val msg = alloc<ProcessExitMsg>()
-                    val iovec = alloc<iovec>()
-                    iovec.iov_base = msg.ptr
-                    iovec.iov_len = sizeOf<ProcessExitMsg>().toULong()
-                    val msghdr = alloc<msghdr>()
-                    msghdr.msg_iov = iovec.ptr
-                    msghdr.msg_iovlen = 1u
-                    val msgLen = recvmsg(fd.unsafeFd, msghdr.ptr, 0)
-                    if (msgLen == -1L) {
-                        when (val errno = errno) {
-                            EINTR -> continue
-                            else -> failWithErrno("recvmsg", errno)
-                        }
-                    }
-                    if (msgLen.toUInt() < sizeOf<ProcessExitMsg>().toUInt()) {
-                        if (msgLen == 0L) return
-                        if (msgLen == -1L) failWithErrno("recvmsg", errno)
-                        throw RuntimeException("Short read from spawn helper: $msgLen")
-                    }
-                    spawnMutex.withLock {
-                        waitFutures[msg.pid]?.complete(msg.exitCode)
-                        waitFutures.remove(msg.pid)
-                    }
-                }
-            }
-        } finally {
-            spawnMutex.withLock {
-                disconnected = true
-                fd.close()
-                val e = RuntimeException("spawn_helper disconnected, pid: $helperPid")
-                waitFutures.values.forEach { it.completeExceptionally(e) }
-            }
+            pthread_detach(tid.value)
         }
     }
 
@@ -118,40 +142,116 @@ internal class SpawnHelper {
         stdinFd: LinuxFd,
         stdoutFd: LinuxFd,
         stderrFd: LinuxFd,
-        waitFuture: CFuture<Int>,
     ): Int {
-        spawnMutex.withLock {
-            if (disconnected) {
-                throw SpawnHelperDead()
-            }
-            memScoped {
+        if (receiverDead) throw SpawnHelperDead()
+        spawnMutex.lock()
+        try {
+            return memScoped {
+                val cArgv = argv.map { it.cstr }
+                val argvPtr = allocArray<CPointerVar<ByteVar>>(cArgv.size + 1)
+                for ((index, arg) in cArgv.withIndex()) {
+                    argvPtr[index] = arg.ptr
+                }
+                argvPtr[cArgv.size] = null
+
+                val envpPtr = envp?.map { it.cstr }?.let { values ->
+                    allocArray<CPointerVar<ByteVar>>(values.size + 1).also { ptr ->
+                        for ((index, value) in values.withIndex()) {
+                            ptr[index] = value.ptr
+                        }
+                        ptr[values.size] = null
+                    }
+                }
+
+                val cwdPtr = cwd?.cstr?.ptr
                 val chdirFailed = alloc<BooleanVar>()
-                val pid = space_iseki_spawnhelper_sendSpawnRequest(
+                chdirFailed.value = false
+                val pid = nativeSendSpawnRequest(
                     helperFd = fd.unsafeFd,
-                    debugName = debugName.cstr,
-                    file = file.cstr,
-                    argv = Array(argv.size + 1) { i -> argv.getOrNull(i)?.cstr?.getPointer(this) }.toCValues(),
-                    envp = envp?.let { Array(it.size + 1) { i -> it.getOrNull(i)?.cstr?.getPointer(this) }.toCValues() },
-                    cwd = cwd?.cstr,
+                    debugName = debugName.cstr.ptr,
+                    file = file.cstr.ptr,
+                    argv = argvPtr,
+                    envp = envpPtr,
+                    cwd = cwdPtr,
                     stdinFd = stdinFd.unsafeFd,
                     stdoutFd = stdoutFd.unsafeFd,
                     stderrFd = stderrFd.unsafeFd,
                     chdirFailed = chdirFailed.ptr,
                 )
                 if (pid == -1) {
-                    val errno = errno
                     if (errno == EPIPE || errno == ECONNRESET) {
                         throw SpawnHelperDead()
                     }
-                    failWithErrno("create_process", errno, file = if (chdirFailed.value) cwd.orEmpty() else file)
+                    failWithErrno("sendSpawnRequest", errno, file = if (chdirFailed.value) cwd.orEmpty() else file)
                 }
-                waitFutures[pid]?.completeExceptionally(RuntimeException("Process $pid reaped by helper before waitpid was called"))
-                waitFutures[pid] = waitFuture
-                return pid
+                pid
             }
+        } finally {
+            spawnMutex.unlock()
+        }
+    }
+
+    internal fun waitForProcessExit(processPid: Int, dur: Duration): Int? {
+        require(dur.isPositive() || dur.isInfinite()) { "Duration must be positive or infinite" }
+        val ready = waitMutex.withLock { exitCodes.remove(processPid) }
+        if (ready != null) return ready
+        if (receiverDead) throw SpawnHelperDead()
+        if (dur.isInfinite()) {
+            while (true) {
+                val code = waitMutex.withLock { exitCodes.remove(processPid) }
+                if (code != null) return code
+                if (receiverDead) throw SpawnHelperDead()
+                usleep(10_000u)
+            }
+        }
+        val begin = TimeSource.Monotonic.markNow()
+        while (begin.elapsedNow() < dur) {
+            val code = waitMutex.withLock { exitCodes.remove(processPid) }
+            if (code != null) return code
+            if (receiverDead) throw SpawnHelperDead()
+            usleep(10_000u)
+        }
+        return null
+    }
+
+    private fun recvExitMsgBlocking(): Pair<Int, Int> {
+        memScoped {
+            val buf = allocArray<IntVar>(2)
+            val msgSize = (2 * sizeOf<IntVar>()).toInt()
+            while (true) {
+                val n = recv(
+                    __fd = fd.unsafeFd,
+                    __buf = buf,
+                    __n = msgSize.convert(),
+                    __flags = 0,
+                ).toInt()
+                if (n == -1 && errno == EINTR) continue
+                if (n == -1 && (errno == EPIPE || errno == ECONNRESET)) throw SpawnHelperDead()
+                if (n == -1) failWithErrno("recv", errno)
+                if (n == 0) throw SpawnHelperDead()
+                if (n != msgSize) {
+                    throw IOException("invalid ProcessExitMsg size: $n")
+                }
+                return buf[0] to buf[1]
+            }
+        }
+        error("unreachable")
+    }
+
+    internal fun runExitReceiverLoop() {
+        try {
+            while (true) {
+                val (pid0, code0) = recvExitMsgBlocking()
+                waitMutex.withLock {
+                    exitCodes[pid0] = code0
+                }
+            }
+        } catch (_: SpawnHelperDead) {
+            receiverDead = true
+        } catch (_: Throwable) {
+            receiverDead = true
         }
     }
 
     class SpawnHelperDead : RuntimeException()
 }
-

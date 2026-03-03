@@ -3,6 +3,12 @@ project(linux_spawn_helper)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Zig toolchain on some versions does not support linker depfile flags
+# like `--dependency-file` emitted by newer CMake/Ninja integration.
+# Disable linker-side depfile generation for both C and CXX targets.
+set(CMAKE_C_LINK_DEPENDS_USE_LINKER FALSE)
+set(CMAKE_CXX_LINK_DEPENDS_USE_LINKER FALSE)
+set(CMAKE_LINK_DEPENDS_USE_LINKER FALSE)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
@@ -15,6 +21,7 @@ include(FetchContent)
 FetchContent_Declare(
         googletest
         URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
 # For Windows: Prevent overriding the parent project's compiler/linker settings
@@ -31,6 +38,7 @@ add_executable(
         mblock_gtest.cc
         spawn_process_comm_gtest.cpp
         error_handling_gtest.cpp
+        spawn_helper_c_gtest.cpp
 )
 
 find_program(CMAKE_OBJCOPY NAMES llvm-objcopy objcopy)
@@ -82,12 +90,14 @@ add_library(
 
 target_compile_options(spawn_helper_lib PUBLIC -fno-sanitize=undefined)
 target_compile_options(spawn_helper_lib PRIVATE -fvisibility=hidden)
+target_compile_definitions(spawn_helper_lib PRIVATE SPAWN_HELPER_TESTING)
 
 target_link_libraries(
         hello_test
         GTest::gtest_main
         spawn_helper_lib
 )
+target_compile_definitions(hello_test PRIVATE SPAWN_HELPER_TESTING)
 
 include(GoogleTest)
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")

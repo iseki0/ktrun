@@ -43,6 +43,7 @@ static int doAllocStringArray(char ***target, const size_t n) {
 }
 
 struct SpawnProcessOptionPersistentHeader {
+    // ABI-dependent on size_t/bool layout. Reader and writer must match ABI.
     size_t argvNumber;
     size_t envpNumber;
     bool envpSet;
@@ -56,6 +57,7 @@ int SpawnProcessOption_parse(struct SpawnProcessOption *option, char *buf) {
     REQUIRE_NULL(option->file);
     REQUIRE_NULL(option->cwd);
     errno = 0;
+    // Layout: header + file + optional cwd + argv[] + optional envp[].
     struct SpawnProcessOptionPersistentHeader header;
     memcpy(&header, buf, sizeof(header));
     buf += sizeof(header);
@@ -100,6 +102,7 @@ size_t SpawnProcessOption_bytesSize(const struct SpawnProcessOption *option) {
     REQUIRE_NOT_NULL(option);
     REQUIRE_NOT_NULL(option->argv);
     REQUIRE_NOT_NULL(option->file);
+    // Exact byte count for buffer allocation before SpawnProcessOption_bytes().
     size_t size = sizeof(struct SpawnProcessOptionPersistentHeader);
     // file
     size += MBlock_SizeOfCString(option->file);

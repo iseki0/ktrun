@@ -11,24 +11,18 @@ extern "C" {
 
 int pipe2(int pipefd[2], int flags);
 
-#define initHelper space_iseki_spawnhelper_initHelper
-int initHelper();
-
-#define HelperStartResult space_iseki_spawnhelper_HelperStartResult
-
-struct HelperStartResult {
-    int commFd;
-    int childErrno;
-    int helperPid;
-};
-
-#define startHelper space_iseki_spawnhelper_startHelper
-struct HelperStartResult startHelper();
+extern const unsigned char _binary_linux_spawn_helper_bin_start[];
+extern const unsigned char _binary_linux_spawn_helper_bin_end[];
 
 #define sendSpawnRequest space_iseki_spawnhelper_sendSpawnRequest
 int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, char *cwd, int stdinFd,
                      int stdoutFd, int stderrFd, bool *chdirFailed);
 
+#ifdef SPAWN_HELPER_TESTING
+int spawnHelperTest_createAnonymousShmFd(const char *prefix, bool executable);
+int spawnHelperTest_createSharedPayloadMemfdFd(const char *debugName);
+int spawnHelperTest_createSharedPayloadShmFd(const char *debugName);
+#endif
 
 #ifdef __cplusplus
 }

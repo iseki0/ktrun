@@ -11,8 +11,12 @@ internal class JvmProcessImpl(builder: ProcessBuilderScopeImpl) : Process {
     override val pid: Long
         get() = jvmProcess.pid()
 
-    override fun kill() {
-        jvmProcess.destroyForcibly()
+    override fun terminate(force: Boolean) {
+        if (force) {
+            jvmProcess.destroyForcibly()
+        } else {
+            jvmProcess.destroy()
+        }
     }
 
     override fun waitForExit(dur: Duration): Int? {

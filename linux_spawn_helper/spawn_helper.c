@@ -6,21 +6,150 @@
 
 #define _GNU_SOURCE // NOLINT(*-reserved-identifier)
 #include <errno.h>
-#include <signal.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #define MFD_CLOEXEC 0x0001U
-#define SYS_memfd_create			319
-
 #define CLOSE_FD_IF_NEED(expr) {if(expr > -1) {if(close(expr) == -1) {perror("close"); abort();}; expr = -1;}}
 
-extern const unsigned char _binary_linux_spawn_helper_bin_start[];
-extern const unsigned char _binary_linux_spawn_helper_bin_end[];
+// memfd may be blocked/unavailable in some environments (e.g. restricted runtimes).
+// For these errno values we fallback to anonymous tmp files.
+static bool shouldFallbackFromMemfd(const int e) {
+    return e == ENOSYS || e == EPERM;
+}
 
-static int binaryMemFd = -1;
+// Try memfd_create through SYS_memfd_create when available at compile time.
+static int createMemfdCompat(const char *const name) {
+#ifdef SYS_memfd_create
+    return syscall(SYS_memfd_create, name, MFD_CLOEXEC);
+#else
+    (void) name;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+static int createAnonymousTmpFd(const char *const prefix, const bool executable) {
+    const char *tmpdir = getenv("TMPDIR");
+    if (tmpdir == NULL || tmpdir[0] == '\0') {
+        tmpdir = "/tmp";
+    }
+    char tmpl[PATH_MAX];
+    const int n = snprintf(tmpl, sizeof(tmpl), "%s/%s-XXXXXX", tmpdir, prefix);
+    if (n < 0 || n >= (int) sizeof(tmpl)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    const int fd = mkstemp(tmpl);
+    if (fd == -1) {
+        return -1;
+    }
+    // Keep caller-visible errno stable on the success path.
+    // Some callers probe memfd first, then fallback here, and do not rely on errno
+    // after success.
+    const int oldErrno = errno;
+    // Unlink immediately so the file lifetime is bound to the fd.
+    if (unlink(tmpl) == -1) {
+        const int e = errno;
+        close(fd);
+        errno = e;
+        return -1;
+    }
+    const int oldFdFlags = fcntl(fd, F_GETFD);
+    if (oldFdFlags == -1 || fcntl(fd, F_SETFD, oldFdFlags | FD_CLOEXEC) == -1) {
+        const int e = errno;
+        close(fd);
+        errno = e;
+        return -1;
+    }
+    // Helper binary fallback must be executable for fexecve().
+    if (executable && fchmod(fd, 0700) == -1) {
+        const int e = errno;
+        close(fd);
+        errno = e;
+        return -1;
+    }
+    errno = oldErrno;
+    return fd;
+}
+
+static int createAnonymousShmFd(const char *const prefix, const bool executable) {
+    // POSIX shm name must start with '/' and contain no other '/'.
+    // Keep a short bounded retry loop for name collisions.
+    const pid_t pid = getpid();
+    for (int i = 0; i < 128; i++) {
+        char name[128];
+        const int n = snprintf(name, sizeof(name), "/%s-%d-%d", prefix, (int) pid, i);
+        if (n < 0 || n >= (int) sizeof(name)) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        const mode_t mode = executable ? 0700 : 0600;
+        const int fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, mode);
+        if (fd == -1) {
+            if (errno == EEXIST) {
+                continue;
+            }
+            return -1;
+        }
+        if (shm_unlink(name) == -1) {
+            const int e = errno;
+            close(fd);
+            errno = e;
+            return -1;
+        }
+        return fd;
+    }
+    errno = EEXIST;
+    return -1;
+}
+
+static int createSharedPayloadMemfdFd(const char *const debugName) {
+    return createMemfdCompat(debugName);
+}
+
+static int createSharedPayloadShmFd(const char *const debugName) {
+    return createAnonymousShmFd(debugName, false);
+}
+
+static int createSharedPayloadFd(const char *const debugName) {
+    int fd = createSharedPayloadMemfdFd(debugName);
+    if (fd != -1) {
+        return fd;
+    }
+    const int e = errno;
+    if (!shouldFallbackFromMemfd(e)) {
+        errno = e;
+        return -1;
+    }
+    fd = createSharedPayloadShmFd("spawn-req");
+    if (fd != -1) {
+        return fd;
+    }
+    return createAnonymousTmpFd("spawn-req", false);
+}
+
+#ifdef SPAWN_HELPER_TESTING
+int spawnHelperTest_createAnonymousShmFd(const char *const prefix, const bool executable) {
+    return createAnonymousShmFd(prefix, executable);
+}
+
+int spawnHelperTest_createSharedPayloadMemfdFd(const char *const debugName) {
+    return createSharedPayloadMemfdFd(debugName);
+}
+
+int spawnHelperTest_createSharedPayloadShmFd(const char *const debugName) {
+    return createSharedPayloadShmFd(debugName);
+}
+#endif
 
 static int readFull(const int fd, void *buf, const int count) {
     int totalRead = 0;
@@ -40,105 +169,6 @@ static int readFull(const int fd, void *buf, const int count) {
     return totalRead; // Return total bytes read
 }
 
-
-int initHelper() {
-    size_t sz = (size_t) (_binary_linux_spawn_helper_bin_end - _binary_linux_spawn_helper_bin_start);
-    // load binary to memfd
-    int memfd = -1;
-    memfd = ON_ERR_GOTO(syscall(SYS_memfd_create, "spawn_helper", MFD_CLOEXEC), err);
-    ON_ERR_GOTO(ftruncate(memfd, sz), err);
-    const void *const p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-    if (p == MAP_FAILED) {
-        goto err;
-    }
-    memcpy((void *) p, _binary_linux_spawn_helper_bin_start, sz);
-    MUST_OK(munmap((void *) p, sz));
-    binaryMemFd = memfd;
-    return 0;
-err:;
-    const int e = errno;
-    if (memfd != -1) {
-        MUST_OK(close(memfd));
-    }
-    errno = e;
-    return -1;
-}
-
-struct HelperStartResult startHelper() {
-    struct HelperStartResult result = {0};
-    errno = 0;
-
-    int errFd[2] = {-1, -1};
-    int sv[2] = {-1, -1};
-    ON_ERR_GOTO(pipe2(errFd, O_CLOEXEC), err);
-    ON_ERR_GOTO(socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, sv), err);
-
-    sigset_t all = {0};
-    sigset_t oldmask = {0};
-    MUST_OK(sigfillset(&all));
-    MUST_OK(sigprocmask(SIG_SETMASK, &all, &oldmask));
-    const int pid = ON_ERR_GOTO(fork(), err);
-    if (pid == 0) {
-        // children
-        ON_ERR_GOTO(dup2(sv[1], COMM_FD_UDS), childErr);
-        // Reset all signal handlers to be ignored, mimicking the original code's logic.
-        // This prevents the child from inheriting unintended signal handlers.
-        struct sigaction sa = {0};
-        sa.sa_handler = SIG_DFL;
-        for (int i = 1; i < NSIG; i++) {
-            // SIGKILL and SIGSTOP cannot be caught or ignored; attempting to set a handler for them will fail.
-            // We skip them to be explicit.
-            if (i == SIGKILL || i == SIGSTOP) continue;
-            // ignore sigaction error, not only for SIGKILL and SIGSTOP.
-            // https://bugzilla.redhat.com/show_bug.cgi?id=53394
-            sigaction(i, &sa, NULL);
-        }
-        sigset_t empty = {0};
-        ON_ERR_GOTO(sigemptyset(&empty), childErr);
-        ON_ERR_GOTO(sigprocmask(SIG_SETMASK, &empty, NULL), childErr);
-        // exec
-        char *argv[] = {"spawn_helper", NULL};
-        extern char **environ;
-        fexecve(binaryMemFd, argv, environ);
-    childErr:;
-        const int e = errno;
-        fullWriteOrExit(errFd[1], &e, sizeof(e));
-        _exit(1);
-    }
-    MUST_OK(sigprocmask(SIG_SETMASK, &oldmask, NULL));
-    // parent
-    CLOSE_FD_IF_NEED(errFd[1]);
-    const int childErrnoLen = readFull(errFd[0], &result.childErrno, sizeof(result.childErrno));
-    if (childErrnoLen == -1) {
-        // read child errno failed
-        result.childErrno = 0;
-        goto err;
-    }
-    if (childErrnoLen != 0) {
-        if (childErrnoLen != sizeof(result.childErrno)) {
-            // read incompleted child errno
-            result.childErrno = EBADMSG;
-        }
-        goto err;
-    }
-
-    CLOSE_FD_IF_NEED(errFd[0]);
-    CLOSE_FD_IF_NEED(sv[1]);
-    result.commFd = sv[0];
-    result.helperPid = pid;
-    return result;
-
-err:;
-    result.commFd = -1;
-    const int e = errno;
-    CLOSE_FD_IF_NEED(errFd[0]);
-    CLOSE_FD_IF_NEED(errFd[1]);
-    CLOSE_FD_IF_NEED(sv[0]);
-    CLOSE_FD_IF_NEED(sv[1]);
-    errno = e;
-    return result;
-}
-
 int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, char **envp, char *cwd, int stdinFd,
                      int stdoutFd, int stderrFd, bool *chdirFailed) {
     REQUIRE_NOT_NULL(file);
@@ -149,6 +179,8 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     int childErrFd[2] = {-1, -1};
     int cloneMsgFd[2] = {-1, -1};
 
+    // childErrFd: child pre-exec errors (errno + chdir flag).
+    // cloneMsgFd: helper returns ProcessCloneResult.
     ON_ERR_GOTO(pipe2(childErrFd, O_CLOEXEC), cleanup);
     ON_ERR_GOTO(pipe2(cloneMsgFd, O_CLOEXEC), cleanup);
 
@@ -160,8 +192,8 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     };
     const int bufSize = (int) SpawnProcessOption_bytesSize(&option);
 
-    // prepare memfd, shared memory
-    memFd = ON_ERR_GOTO(syscall(SYS_memfd_create, debugName, MFD_CLOEXEC), cleanup);
+    // Request payload transport fd: memfd preferred, tmp-file fallback.
+    memFd = ON_ERR_GOTO(createSharedPayloadFd(debugName), cleanup);
     ON_ERR_GOTO(ftruncate(memFd, bufSize), cleanup);
     buf = mmap(NULL, bufSize, PROT_READ | PROT_WRITE, MAP_SHARED, memFd, 0);
     if (buf == MAP_FAILED) goto cleanup;
@@ -169,7 +201,9 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     SpawnProcessOption_bytes(&option, buf);
     MUST_OK(munmap(buf, bufSize));
     buf = NULL;
-    // prepare fd array
+    // FD order must match REQ_* indices defined in spawn_helper_comm.h.
+    // Note: SCM_RIGHTS transfers duplicates, so receiver sees different fd numbers
+    // that refer to the same underlying open-file descriptions.
     int fds[REQ_FD_LEN] = {0};
     fds[REQ_CHILD_FD0_IDX] = stdinFd;
     fds[REQ_CHILD_FD1_IDX] = stdoutFd;
@@ -201,11 +235,12 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
     memcpy(CMSG_DATA(cmsghdr), fds, sizeof(fds));
     // send message
     ON_ERR_GOTO(sendmsg(helperFd, &msg, 0), cleanup);
-    // close unneeded fds
+    // Close local writer fds after sendmsg(): receiver already got duplicates.
+    // This ensures EOF semantics on pipes are controlled by helper/child only.
     CLOSE_FD_IF_NEED(memFd);
     CLOSE_FD_IF_NEED(childErrFd[1]);
     CLOSE_FD_IF_NEED(cloneMsgFd[1]);
-    // handle clone result and error
+    // clone result must be a full ProcessCloneResult frame.
     struct ProcessCloneResult cloneResult = {0};
     if (ON_ERR_GOTO(readFull(cloneMsgFd[0], &cloneResult, sizeof(cloneResult)), cleanup) != sizeof(cloneResult)) {
         cloneResult._errno = EBADMSG;
@@ -214,7 +249,7 @@ int sendSpawnRequest(int helperFd, char *debugName, char *file, char **argv, cha
         errno = cloneResult._errno;
         goto cleanup;
     }
-    // handle child error
+    // child error frame: [errno, chdirFailedFlag]. EOF means no error from child.
     int childErrno[2] = {0, 0};
     const int childErrnoLen = ON_ERR_GOTO(readFull(childErrFd[0], childErrno, sizeof(childErrno)), cleanup);
     if (childErrnoLen != sizeof(childErrno) && childErrnoLen != 0) {
